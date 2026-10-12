@@ -34,8 +34,6 @@ Deploy (部署)     → 生产环境部署与兼容性
 | **专家** | Week 7 | Day 38-44 | 高级并行编程 | ★★★★☆ | PG Ch10.19-10.28, Ch12, Ch20 |
 | **专家** | Week 8 | Day 45-52 | CUDA 生态系统 | ★★★★☆ | PG Ch13-16, BPG Ch6,14-20 |
 | **大师** | Week 9 | Day 53-60 | 专家级实战 | ★★★★★ | 全部综合 |
-| **扩展** | CUTLASS | — | 高性能 GEMM 库 (CuTe) | ★★★★★ | [`cutlass_learning/`](cutlass_learning/) |
-| **扩展** | cuBLAS | — | 官方线性代数库 (性能标尺) | ★★★☆☆ | [`cublas_learning/`](cublas_learning/) |
 
 > **PG** = Programming Guide, **BPG** = Best Practices Guide
 
