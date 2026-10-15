@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPU Workflow Lab</title>
+  <style>
+    :root {
+      --ink: #e8edf2;
+      --muted: #98a7b6;
+      --line: #31414c;
+      --panel: #101a20;
+      --panel-2: #14242c;
+      --bg: #071015;
+      --amber: #f4b35e;
+      --cyan: #52d5d1;
+      --green: #8bd49c;
+      --red: #f07878;
+      --purple: #b5a0f4;
+      --mono: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+      --sans: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(82, 213, 209, .045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(82, 213, 209, .045) 1px, transparent 1px),
+        var(--bg);
+      background-size: 32px 32px;
+      font-family: var(--sans);
+      min-width: 320px;
+    }
+    .shell { max-width: 1180px; margin: 0 auto; padding: 38px 24px 54px; }
+    .eyebrow { color: var(--amber); font: 500 12px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    h1 { font-size: clamp(30px, 5vw, 56px); line-height: 1; letter-spacing: .01em; margin: 12px 0 14px; font-weight: 500; }
+    .lede { color: var(--muted); max-width: 710px; line-height: 1.7; margin: 0; }
+    .lab { margin-top: 32px; border-top: 1px solid var(--line); }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 16px 0; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+    button {
+      border: 1px solid var(--line); background: var(--panel); color: var(--ink); min-height: 40px;
+      padding: 8px 13px; font: 500 13px var(--sans); cursor: pointer; transition: border-color .2s, background .2s, transform .2s;
+    }
+    button:hover, button:focus-visible { border-color: var(--cyan); background: var(--panel-2); outline: none; }
+    button:active { transform: translateY(1px); }
+    .step-label { color: var(--muted); font: 12px var(--mono); }
+    .step-label strong { color: var(--amber); font-weight: 500; }
+    .timeline { display: grid; grid-template-columns: repeat(7, 1fr); gap: 7px; margin: 8px 0 30px; }
+    .phase { min-width: 0; }
+    .phase-dot { height: 5px; background: #22323b; margin-bottom: 8px; transition: background .3s, box-shadow .3s; }
+    .phase.is-done .phase-dot { background: var(--green); }
+    .phase.is-active .phase-dot { background: var(--amber); box-shadow: 0 0 16px rgba(244, 179, 94, .7); }
+    .phase-name { color: var(--muted); font: 11px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .phase.is-active .phase-name { color: var(--amber); }
+    .stage {
+      display: grid; grid-template-columns: 1fr 1.35fr 1fr; gap: 18px; align-items: stretch;
+      min-height: 355px;
+    }
+    .zone { border: 1px solid var(--line); background: rgba(16, 26, 32, .88); padding: 18px; position: relative; }
+    .zone-title { color: var(--muted); font: 12px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+    .zone h2 { font-size: 23px; font-weight: 500; margin: 9px 0 5px; }
+    .zone p { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 0; }
+    .host-stack { display: grid; gap: 10px; margin-top: 28px; }
+    .chip { border-left: 3px solid var(--amber); background: rgba(244, 179, 94, .08); padding: 12px; font: 12px/1.55 var(--mono); }
+    .chip small { color: var(--muted); display: block; font-family: var(--sans); margin-top: 3px; }
+    .gpu-zone { background: rgba(20, 36, 44, .94); overflow: hidden; }
+    .gpu-zone::after { content: ""; position: absolute; inset: 56px 18px 18px; border: 1px dashed rgba(82, 213, 209, .23); pointer-events: none; }
+    .mapping { position: relative; z-index: 1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 17px; color: var(--ink); font: 11px var(--mono); }
+    .mapping span { border: 1px solid #46616b; background: rgba(82, 213, 209, .07); padding: 5px 7px; }
+    .mapping b { color: var(--amber); font-weight: 500; }
+    .cluster-label { position: relative; z-index: 1; margin-top: 10px; color: var(--muted); font: 10px var(--mono); }
+    .gpu-bus { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 25px; }
+    .sm { border: 1px solid #35515a; background: rgba(7, 16, 21, .78); padding: 12px; transition: border-color .3s, background .3s, box-shadow .3s; }
+    .sm.is-hot { border-color: var(--cyan); background: rgba(82, 213, 209, .09); box-shadow: inset 0 0 24px rgba(82, 213, 209, .08); }
+    .sm-name { font: 12px var(--mono); color: var(--cyan); }
+    .sm-bar { height: 4px; background: #263a42; margin: 13px 0 8px; overflow: hidden; }
+    .sm-bar span { display: block; height: 100%; width: 28%; background: var(--cyan); transition: width .45s ease; }
+    .sm.is-hot .sm-bar span { width: 82%; }
+    .sm-meta { color: var(--muted); font: 11px/1.65 var(--mono); }
+    .memory-zone { margin-top: 15px; position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .memory { border-top: 2px solid var(--purple); padding-top: 8px; color: var(--muted); font: 11px/1.45 var(--mono); }
+    .memory strong { color: var(--ink); display: block; font-family: var(--sans); font-size: 12px; font-weight: 500; }
+    .result-stack { display: grid; gap: 10px; margin-top: 28px; }
+    .result { border-left: 3px solid var(--green); background: rgba(139, 212, 156, .08); padding: 12px; font: 12px/1.55 var(--mono); }
+    .result small { color: var(--muted); display: block; font-family: var(--sans); margin-top: 3px; }
+    .flow { position: absolute; inset: auto 0 20px; height: 32px; display: flex; align-items: center; z-index: 4; pointer-events: none; }
+    .flow-line { height: 2px; background: #53656d; flex: 1; }
+    .token { width: 21px; height: 21px; background: var(--amber); color: #071015; font: 700 10px/21px var(--mono); text-align: center; box-shadow: 0 0 0 5px rgba(244,179,94,.12), 0 0 24px rgba(244,179,94,.6); border-radius: 50%; position: absolute; left: 3%; transition: left .6s cubic-bezier(.22,.8,.25,1), background .3s, box-shadow .3s; }
+    .token.is-compute { background: var(--cyan); box-shadow: 0 0 0 5px rgba(82,213,209,.12), 0 0 24px rgba(82,213,209,.7); }
+    .token.is-result { background: var(--green); box-shadow: 0 0 0 5px rgba(139,212,156,.12), 0 0 24px rgba(139,212,156,.65); }
+    .explain { border-top: 1px solid var(--line); margin-top: 20px; padding: 17px 0 0; display: grid; grid-template-columns: 145px 1fr; gap: 18px; }
+    .explain-label { color: var(--amber); font: 12px var(--mono); }
+    .explain-text { color: var(--ink); font-size: 15px; line-height: 1.65; margin: 0; }
+    .detail { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 24px; }
+    .detail-section { border-top: 1px solid var(--line); padding-top: 15px; }
+    .detail-section h3 { font: 500 13px var(--mono); color: var(--cyan); margin: 0 0 12px; }
+    .detail-section p { color: var(--muted); font-size: 13px; line-height: 1.65; margin: 0; }
+    .legend { display: flex; flex-wrap: wrap; gap: 13px; margin-top: 14px; color: var(--muted); font: 11px var(--mono); }
+    .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; background: var(--amber); }
+    .legend span:nth-child(2)::before { background: var(--cyan); }
+    .legend span:nth-child(3)::before { background: var(--green); }
+    .footer { color: var(--muted); font: 11px/1.6 var(--mono); margin-top: 38px; border-top: 1px solid var(--line); padding-top: 14px; }
+    @media (max-width: 760px) {
+      .shell { padding: 28px 16px 40px; }
+      .stage { grid-template-columns: 1fr; min-height: 0; }
+      .gpu-zone { min-height: 330px; }
+      .flow { display: none; }
+      .detail { grid-template-columns: 1fr; }
+      .explain { grid-template-columns: 1fr; gap: 7px; }
+      .timeline { gap: 4px; }
+      .phase-name { font-size: 10px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell" aria-labelledby="page-title">
+    <div class="eyebrow">CUDA / HARDWARE MODEL / 01</div>
+    <h1 id="page-title">GPU Workflow Lab</h1>
+    <p class="lede">用一次向量加法追踪数据和指令：CPU 提交工作，GPU 分发 block，warp 读取数据并计算，结果经 DMA 返回主机。</p>
+
+    <section class="lab" aria-label="GPU 工作流程动画">
+      <div class="toolbar">
+        <div class="controls">
+          <button type="button" id="play" aria-label="播放动画">▶ 播放</button>
+          <button type="button" id="pause" aria-label="暂停动画">Ⅱ 暂停</button>
+          <button type="button" id="prev" aria-label="上一步">← 上一步</button>
+          <button type="button" id="next" aria-label="下一步">下一步 →</button>
+          <button type="button" id="reset" aria-label="重置动画">↺ 重置</button>
+        </div>
+        <div class="step-label">PHASE <strong id="stepNo">01</strong> / 07 · <span id="stepName">提交</span></div>
+      </div>
+
+      <div class="timeline" aria-label="流程阶段">
+        <div class="phase is-active"><div class="phase-dot"></div><div class="phase-name">提交</div></div>
+        <div class="phase"><div class="phase-dot"></div><div class="phase-name">H2D</div></div>
+        <div class="phase"><div class="phase-dot"></div><div class="phase-name">分发</div></div>
+        <div class="phase"><div class="phase-dot"></div><div class="phase-name">访存</div></div>
+        <div class="phase"><div class="phase-dot"></div><div class="phase-name">计算</div></div>
+        <div class="phase"><div class="phase-dot"></div><div class="phase-name">写回</div></div>
+        <div class="phase"><div class="phase-dot"></div><div class="phase-name">D2H</div></div>
+      </div>
+
+      <div class="stage">
+        <section class="zone" aria-label="CPU 主机">
+          <div class="zone-title">HOST / CPU</div>
+          <h2>主机线程</h2>
+          <p>准备指针、参数和 stream 顺序，把工作放入驱动命令队列。</p>
+          <div class="host-stack">
+            <div class="chip">kernel&lt;&lt;&lt;grid, block&gt;&gt;&gt;<small>一个 launch 描述要处理的工作量</small></div>
+            <div class="chip">A[ i ] + B[ i ]<small>输入数据位于 host memory</small></div>
+          </div>
+        </section>
+
+        <section class="zone gpu-zone" aria-label="GPU 与 SM">
+          <div class="zone-title">DEVICE / GPU</div>
+          <h2>工作分发与执行</h2>
+          <p>block 被放入有资源的 SM，warp 以 32 个 lane 的 SIMT 方式执行。</p>
+          <div class="mapping" aria-label="CUDA 抽象到硬件的映射"><span>Grid</span><b>→</b><span>Block / CTA</span><b>→</b><span>Warp × 32</span><b>→</b><span>SM</span></div>
+          <div class="cluster-label">GPC / TPC：物理分组（CUDA 不直接控制）</div>
+          <div class="gpu-bus">
+            <div class="sm" data-sm="0"><div class="sm-name">SM 00 / warp scheduler</div><div class="sm-bar"><span></span></div><div class="sm-meta">register file<br>shared memory / L1</div></div>
+            <div class="sm" data-sm="1"><div class="sm-name">SM 01 / warp scheduler</div><div class="sm-bar"><span></span></div><div class="sm-meta">register file<br>shared memory / L1</div></div>
+            <div class="sm" data-sm="2"><div class="sm-name">SM 02 / warp scheduler</div><div class="sm-bar"><span></span></div><div class="sm-meta">register file<br>shared memory / L1</div></div>
+            <div class="sm" data-sm="3"><div class="sm-name">SM 03 / warp scheduler</div><div class="sm-bar"><span></span></div><div class="sm-meta">register file<br>shared memory / L1</div></div>
+          </div>
+          <div class="memory-zone">
+            <div class="memory"><strong>寄存器</strong>thread-private</div>
+            <div class="memory"><strong>L2 cache</strong>GPU-wide</div>
+            <div class="memory"><strong>显存 / DRAM</strong>global data</div>
+          </div>
+          <div class="flow" aria-hidden="true"><div class="flow-line"></div><div class="token" id="token">A+B</div><div class="flow-line"></div></div>
+        </section>
+
+        <section class="zone" aria-label="结果回传">
+          <div class="zone-title">RESULT / HOST</div>
+          <h2>结果可见</h2>
+          <p>GPU 写回 C 后，CPU 通过 stream 依赖或显式同步读取结果。</p>
+          <div class="result-stack">
+            <div class="result">C[ i ] = result<small>设备端 global memory</small></div>
+            <div class="result">D2H → host<small>DMA 传输完成后可使用</small></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="explain">
+        <div class="explain-label">CURRENT EVENT</div>
+        <p class="explain-text" id="explain" aria-live="polite">CPU 将 kernel 参数、grid/block 配置和 stream 顺序放入命令队列；此时 GPU 尚未开始执行。</p>
+      </div>
+      <div class="legend" aria-label="颜色含义"><span>数据 token</span><span>正在执行</span><span>已完成 / 结果</span></div>
+    </section>
+
+    <section class="detail" aria-label="观察要点">
+      <div class="detail-section"><h3>你正在看到什么</h3><p>一个 block 不会拆到多个 SM。每个 SM 可以同时驻留多个 block，warp scheduler 在等待显存时切换到另一个可运行 warp。</p></div>
+      <div class="detail-section"><h3>如何连接到代码</h3><p><code>cudaMemcpyAsync</code> 对应 DMA 路径，<code>&lt;&lt;&lt;grid, block&gt;&gt;&gt;</code> 对应工作分发，kernel 中的 load/add/store 对应访存、计算和写回。</p></div>
+    </section>
+    <div class="footer">配套阅读：hardware_basics/architecture_workflow.md · 这是硬件模型的教学动画，不代表某一 GPU 型号的精确周期数。</div>
+  </main>
+  <script>
+    const phases = [
+      { name: "提交", text: "CPU 将 kernel 参数、grid/block 配置和 stream 顺序放入命令队列；此时 GPU 尚未开始执行。", pos: 3, cls: "" },
+      { name: "H2D", text: "DMA 引擎把 A、B 从 host memory 搬到 GPU 显存。使用 pinned memory 更容易与计算重叠。", pos: 18, cls: "" },
+      { name: "分发", text: "GPU 前端把 thread block 分配给有足够寄存器、shared memory 和线程槽位的 SM。", pos: 34, cls: "" },
+      { name: "访存", text: "一个 warp 的 32 个 lane 读取 A[i] 和 B[i]，合并访存后经 L2 / 显存返回寄存器。", pos: 50, cls: "" },
+      { name: "计算", text: "每个 lane 在寄存器中执行 FP32 加法。若 warp 内发生分支，非活跃 lane 会降低有效吞吐。", pos: 62, cls: "is-compute" },
+      { name: "写回", text: "结果从寄存器经 store 写入 C 的 global memory；写入完成后才能被后续工作安全消费。", pos: 78, cls: "is-result" },
+      { name: "D2H", text: "CPU 需要结果时，DMA 将 C 从显存搬回 host memory；同步或 event 建立可见性边界。", pos: 94, cls: "is-result" }
+    ];
+    let current = 0;
+    let timer = null;
+    const phasesEl = [...document.querySelectorAll('.phase')];
+    const sms = [...document.querySelectorAll('.sm')];
+    const token = document.getElementById('token');
+    const stepNo = document.getElementById('stepNo');
+    const stepName = document.getElementById('stepName');
+    const explain = document.getElementById('explain');
+    function render() {
+      const p = phases[current];
+      phasesEl.forEach((el, i) => el.classList.toggle('is-active', i === current));
+      phasesEl.forEach((el, i) => el.classList.toggle('is-done', i < current));
+      sms.forEach((el, i) => el.classList.toggle('is-hot', current >= 2 && current <= 5 && i < (current === 2 ? 2 : 4)));
+      token.style.left = p.pos + '%';
+      token.className = 'token ' + p.cls;
+      token.textContent = current === 4 ? 'ADD' : current >= 5 ? 'C' : 'A+B';
+      stepNo.textContent = String(current + 1).padStart(2, '0');
+      stepName.textContent = p.name;
+      explain.textContent = p.text;
+    }
+    function next() { current = (current + 1) % phases.length; render(); }
+    function prev() { current = (current - 1 + phases.length) % phases.length; render(); }
+    function play() { if (!timer) timer = setInterval(next, 1700); }
+    function pause() { clearInterval(timer); timer = null; }
+    document.getElementById('next').addEventListener('click', next);
+    document.getElementById('prev').addEventListener('click', prev);
+    document.getElementById('play').addEventListener('click', play);
+    document.getElementById('pause').addEventListener('click', pause);
+    document.getElementById('reset').addEventListener('click', () => { pause(); current = 0; render(); });
+    render();
+  </script>
+</body>
+</html>

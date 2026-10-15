@@ -6,6 +6,18 @@
 
 建议在开始 Week 1 之前或同期阅读本模块，它是所有性能优化的地基。
 
+**章节导航**：上一章：[第 0 章 并行计算思维](../parallel_thinking/README.md) ｜ 第 1 章 · GPU 硬件基础 ｜ 下一章：[第 2 章 CUDA 基础](../week1_basics/)
+
+## 学习入口
+
+本目录现在分成两条互补的线：
+
+- [并行计算思维](../parallel_thinking/)：从任务拆分、依赖、通信、同步和性能模型出发设计算法。
+- [GPU 硬件工作流程](architecture_workflow.md)：跟踪 kernel 从 CPU 入队、block 分发、warp 发射、内存访问到结果写回的全过程。
+- [GPU 工作流程动画](gpu_workflow_animation.html)：用播放和单步操作观察一次向量加法的完整数据路径。
+
+推荐顺序：先读并行计算思维，再读硬件工作流程，最后运行本目录的查询和带宽实验。
+
 ---
 
 ## 一、GPU vs CPU 的设计哲学
@@ -39,6 +51,8 @@ Grid (整个 kernel 的所有线程)
 ```
 
 > 关键映射：**一个 Block 跑在一个 SM 上；一个 Block 被拆成若干 Warp 调度。**
+
+这张图是编程模型到硬件资源的第一层映射。实际执行还会经过命令队列、工作分发器、warp scheduler、各类计算管线、L1/L2 和 DMA 引擎；完整时间线见 [GPU 硬件工作流程](architecture_workflow.md)。
 
 ## 三、Warp —— 最重要的概念
 
