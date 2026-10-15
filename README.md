@@ -20,6 +20,88 @@ Optimize (优化)    → 内存、指令、执行配置三层优化
 Deploy (部署)     → 生产环境部署与兼容性
 ```
 
+## 先看 GPU：结构、数据流和并行方式
+
+CUDA 代码真正执行时，会经历“主机提交 → GPU 分发 → SM 执行 → 内存读写 → 结果回传”。先看下面三张图，再阅读 Day 01 的 kernel，会更容易理解 `gridDim`、`blockIdx`、`threadIdx` 和内存访问。
+
+### 1. GPU 的整体结构
+
+```mermaid
+flowchart LR
+    CPU[CPU / Host 内存] <-->|PCIe / NVLink + DMA| GPU[GPU Device]
+    subgraph GPU
+        FRONT[前端与工作分发器]
+        subgraph CLUSTERS[GPC / TPC 物理分组]
+            GPC1[GPC] --> TPC1[TPC] --> SM1[多个 SM]
+            GPC2[GPC] --> TPC2[TPC] --> SM2[多个 SM]
+        end
+        FRONT --> GPC1
+        FRONT --> GPC2
+        SM1 --> L2[L2 Cache]
+        SM2 --> L2
+        L2 --> DRAM[显存 / DRAM]
+        COPY[Copy Engine] <--> DRAM
+    end
+```
+
+GPC/TPC 是 GPU 的物理组织方式；SM 是 CUDA 最重要的硬件执行单元。一个 SM 里有 warp scheduler、寄存器、shared memory/L1、CUDA Core、Tensor Core 和访存管线。
+
+### 2. Grid、Block、Warp 如何落到 SM
+
+```mermaid
+flowchart TB
+    GRID["Grid：一次 kernel 的全部工作"] --> BLOCK["Block / CTA：可独立调度的工作单元"]
+    BLOCK --> WARP["Warp：32 个线程，共享指令流"]
+    WARP --> THREAD["Thread：私有寄存器、地址和谓词"]
+    BLOCK -. 整体驻留 .-> SM["SM：寄存器 + shared/L1 + 计算管线"]
+    SM --> CORE[CUDA Core / Tensor Core]
+    SM --> MEM[寄存器 → L1/shared → L2 → 显存]
+```
+
+对应到 CUDA：
+
+```cpp
+kernel<<<grid, block>>>(...);  // Grid 和 Block
+int i = blockIdx.x * blockDim.x + threadIdx.x;  // 当前 Thread 找到数据
+```
+
+一个 Block 整体放到一个 SM 上，再拆成多个 Warp。Block 的执行顺序不能假设；Warp 内 32 个线程通常执行同一条指令，所以分支发散和非合并访存都会降低吞吐。
+
+### 3. CPU-GPU 一次数据通信和计算
+
+```mermaid
+sequenceDiagram
+    participant CPU as CPU / Host
+    participant Q as Driver + Stream
+    participant DMA as PCIe/NVLink + DMA
+    participant SM as SM / Warp
+    participant MEM as L2 / 显存
+    CPU->>Q: kernel 参数和 grid/block 入队
+    CPU->>DMA: H2D 搬运 A、B
+    DMA->>MEM: 写入显存
+    Q->>SM: 分发 Block
+    SM->>MEM: load A[i]、B[i]
+    MEM-->>SM: 返回寄存器
+    SM->>SM: C[i] = A[i] + B[i]
+    SM->>MEM: store C[i]
+    CPU->>DMA: D2H 请求 C
+    DMA-->>CPU: 返回结果
+```
+
+H2D/D2H 是 CPU 与 GPU 的通信，L2/显存是 GPU 内的数据路径，寄存器和 shared memory 是 SM 内的高速数据路径。动画版可以[打开 GPU Workflow Lab](https://shaun-sheep111.github.io/cuda-learning-roadmap/hardware_basics/gpu_workflow_animation.html)，用播放或单步观察这七个阶段。
+
+### 4. 并行计算方式速查
+
+| 并行方式 | 如何拆分 | CUDA / AI Infra 例子 |
+|---|---|---|
+| 数据并行 | 每个线程处理一个元素或样本 | 向量加法、图像像素、Batch 推理 |
+| 分块并行 | Block/Tile 搬入 shared，重复复用 | 矩阵乘、卷积、FlashAttention |
+| 归约并行 | 多个局部结果合并为一个结果 | Sum、Max、Softmax、LayerNorm |
+| 流水并行 | 让搬运、计算、写回阶段重叠 | 多 stream、异步拷贝、模型流水 |
+| 多卡并行 | 切分 batch、张量、层或序列 | Data/Tensor/Pipeline/Sequence Parallel |
+
+核心判断顺序是：**工作如何切分 → 数据在哪里 → 需要多少通信 → 同步范围多大 → 瓶颈是计算还是带宽**。这也是 FlashAttention、vLLM 和 CUDA kernel 共同使用的并行设计方法。
+
 ## CUDA 之下的两层基础
 
 CUDA 代码只是 GPU 编程接口。学习路线还需要回答两个更底层的问题：
