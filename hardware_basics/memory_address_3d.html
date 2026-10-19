@@ -3,125 +3,199 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Memory Address 3D</title>
+  <title>GPU 内存层级 × 地址链路 · 3D</title>
   <style>
     :root { --bg:#071015; --ink:#e8edf2; --muted:#93a4ae; --line:#31424b; --amber:#f4b35e; --cyan:#52d5d1; --purple:#b5a0f4; --green:#8bd49c; --red:#f07878; --mono:"SFMono-Regular","Cascadia Code","Liberation Mono",monospace; --sans:"Avenir Next","PingFang SC","Hiragino Sans GB",sans-serif; }
     * { box-sizing:border-box; }
     html,body { height:100%; margin:0; overflow:hidden; background:var(--bg); color:var(--ink); font-family:var(--sans); }
-    #scene { position:fixed; inset:0; width:100%; height:100%; overflow:hidden; cursor:grab; background:radial-gradient(circle at 52% 52%, rgba(28,64,72,.25), transparent 43%), var(--bg); perspective:1200px; }
+    #scene { position:fixed; inset:0; width:100%; height:100%; overflow:hidden; cursor:grab; background:radial-gradient(circle at 54% 50%, rgba(28,64,72,.26), transparent 44%), var(--bg); perspective:1300px; }
     #scene:active { cursor:grabbing; }
-    .world { position:absolute; left:50%; top:54%; width:860px; height:560px; transform-style:preserve-3d; transform:translate(-50%,-50%) rotateX(56deg) rotateY(-10deg) scale(.92); transition:transform .45s ease; }
-    .world::before { content:""; position:absolute; inset:-80px; transform:translateZ(-150px); background:linear-gradient(rgba(82,213,209,.09) 1px, transparent 1px),linear-gradient(90deg,rgba(82,213,209,.09) 1px,transparent 1px); background-size:32px 32px; border:1px solid rgba(82,213,209,.16); opacity:.6; }
-    .route { position:absolute; inset:0; width:100%; height:100%; overflow:visible; transform:translateZ(145px); }
-    .route polyline { fill:none; stroke:#49666f; stroke-width:3; stroke-dasharray:8 9; opacity:.8; }
-    .route circle { fill:#f4b35e; stroke:#fff0c9; stroke-width:2; filter:drop-shadow(0 0 9px rgba(244,179,94,.8)); }
-    .layer { position:absolute; left:50%; width:440px; height:74px; transform:translateX(-50%) translateZ(var(--z)); border:1px solid color-mix(in srgb, var(--layer) 70%, white 8%); background:linear-gradient(105deg, color-mix(in srgb, var(--layer) 23%, #071015), rgba(7,16,21,.7)); box-shadow:18px 18px 0 rgba(3,9,12,.5), 0 0 30px color-mix(in srgb, var(--layer) 24%, transparent); padding:13px 18px; display:flex; justify-content:space-between; align-items:center; transform-style:preserve-3d; }
-    .layer::after { content:""; position:absolute; inset:100% -1px auto 14px; height:18px; background:color-mix(in srgb, var(--layer) 30%, #071015); border:1px solid color-mix(in srgb, var(--layer) 50%, #071015); transform:skewX(42deg); transform-origin:top; opacity:.7; }
-    .layer strong { color:var(--layer); font:500 17px var(--mono); letter-spacing:.03em; }
-    .layer small { color:var(--muted); font:11px/1.5 var(--mono); text-align:right; }
-    .registers { top:78px; --z:120px; --layer:#f4b35e; }
-    .shared { top:172px; --z:65px; --layer:#52d5d1; }
-    .l2 { top:266px; --z:10px; --layer:#b5a0f4; }
-    .vram { top:360px; --z:-45px; --layer:#8bd49c; }
-    .cluster { position:absolute; left:66px; top:45px; width:170px; height:116px; transform:translateZ(158px); border:1px solid rgba(244,179,94,.55); background:rgba(7,16,21,.78); padding:12px; box-shadow:12px 12px 0 rgba(3,9,12,.55); }
-    .cluster-label { color:var(--amber); font:11px var(--mono); }
+
+    /* ---------- 3D 世界 ---------- */
+    .world { position:absolute; left:50%; top:52%; width:900px; height:600px; transform-style:preserve-3d; transform:translate(-50%,-50%) rotateX(58deg) rotateY(-12deg) scale(.9); transition:transform .4s ease; }
+    .world::before { content:""; position:absolute; inset:-90px; transform:translateZ(-170px); background:linear-gradient(rgba(82,213,209,.09) 1px, transparent 1px),linear-gradient(90deg,rgba(82,213,209,.09) 1px,transparent 1px); background-size:34px 34px; border:1px solid rgba(82,213,209,.16); opacity:.55; }
+
+    /* 连接层级的下潜竖井 */
+    .shaft { position:absolute; left:calc(50% + 150px); top:92px; width:30px; height:330px; transform:translateX(-50%) translateZ(-40px); background:repeating-linear-gradient(transparent 0 11px, rgba(244,179,94,.22) 11px 13px); border-left:1px dashed rgba(244,179,94,.4); border-right:1px dashed rgba(244,179,94,.4); opacity:.8; }
+
+    /* 内存层板 */
+    .layer { position:absolute; left:50%; width:470px; height:80px; transform:translateX(-50%) translateZ(var(--z)); border:1px solid color-mix(in srgb, var(--layer) 70%, white 8%); background:linear-gradient(105deg, color-mix(in srgb, var(--layer) 24%, #071015), rgba(7,16,21,.72)); box-shadow:20px 20px 0 rgba(3,9,12,.5), 0 0 34px color-mix(in srgb, var(--layer) 24%, transparent); padding:11px 18px; display:flex; justify-content:space-between; align-items:center; transform-style:preserve-3d; transition:box-shadow .3s, border-color .3s; }
+    .layer::after { content:""; position:absolute; inset:100% -1px auto 14px; height:22px; background:color-mix(in srgb, var(--layer) 30%, #071015); border:1px solid color-mix(in srgb, var(--layer) 50%, #071015); transform:skewX(42deg); transform-origin:top; opacity:.7; }
+    .layer.hot { box-shadow:20px 20px 0 rgba(3,9,12,.5), 0 0 60px color-mix(in srgb, var(--layer) 70%, transparent); border-color:color-mix(in srgb, var(--layer) 95%, white 20%); }
+    .layer .lt { display:flex; flex-direction:column; gap:3px; }
+    .layer strong { color:var(--layer); font:600 17px var(--mono); letter-spacing:.03em; }
+    .layer .cap { color:var(--muted); font:11px var(--mono); }
+    .layer .rt { text-align:right; display:flex; flex-direction:column; gap:3px; }
+    .layer .cyc { color:var(--ink); font:600 14px var(--mono); }
+    .layer .note { color:var(--muted); font:10px var(--mono); }
+    .registers { top:70px;  --z:135px; --layer:#f4b35e; }
+    .shared    { top:170px; --z:70px;  --layer:#52d5d1; }
+    .l2        { top:270px; --z:5px;   --layer:#b5a0f4; }
+    .vram      { top:370px; --z:-60px; --layer:#8bd49c; }
+
+    /* GRID→BLOCK→WARP 发射源 */
+    .cluster { position:absolute; left:60px; top:36px; width:182px; height:124px; transform:translateZ(172px); border:1px solid rgba(244,179,94,.55); background:rgba(7,16,21,.8); padding:12px; box-shadow:14px 14px 0 rgba(3,9,12,.55); }
+    .cluster-label { color:var(--amber); font:11px var(--mono); letter-spacing:.04em; }
     .blocks { display:flex; gap:7px; margin-top:14px; }
-    .block { width:38px; height:31px; border:1px solid rgba(82,213,209,.75); background:rgba(82,213,209,.18); position:relative; }
-    .block::after { content:""; position:absolute; width:5px; height:5px; right:5px; bottom:5px; background:var(--cyan); box-shadow:-8px 0 var(--cyan),-16px 0 var(--cyan); }
-    .warp-label { color:var(--muted); font:10px var(--mono); margin-top:10px; }
-    .token { position:absolute; left:0; top:0; width:34px; height:34px; margin:-17px 0 0 -17px; border-radius:50%; transform:translate3d(90px,90px,170px); background:var(--amber); color:#071015; display:grid; place-items:center; font:700 10px var(--mono); box-shadow:0 0 0 8px rgba(244,179,94,.13),0 0 30px rgba(244,179,94,.72); transition:transform .65s cubic-bezier(.22,.8,.25,1),background .3s,box-shadow .3s; z-index:4; }
-    .token::after { content:""; position:absolute; inset:-10px; border:1px solid currentColor; border-radius:50%; opacity:.55; animation:ping 1.8s ease-out infinite; }
-    @keyframes ping { from { transform:scale(.72); opacity:.7; } to { transform:scale(1.35); opacity:0; } }
-    .stage-mark { position:absolute; color:var(--muted); font:10px var(--mono); transform:translateZ(152px); opacity:.82; }
-    .mark-code { left:65px; top:190px; }
-    .mark-address { left:278px; top:224px; }
-    .mark-load { left:525px; top:332px; }
-    .mark-store { left:691px; top:208px; }
-    .hud { position:fixed; inset:0; pointer-events:none; padding:28px 30px; display:flex; flex-direction:column; justify-content:space-between; }
-    .header { max-width:760px; }
+    .block { width:40px; height:33px; border:1px solid rgba(82,213,209,.75); background:rgba(82,213,209,.18); position:relative; }
+    .block.lit { background:rgba(244,179,94,.4); border-color:var(--amber); }
+    .block::after { content:""; position:absolute; width:5px; height:5px; right:5px; bottom:5px; background:var(--cyan); box-shadow:-9px 0 var(--cyan),-18px 0 var(--cyan); }
+    .warp-label { color:var(--muted); font:10px var(--mono); margin-top:12px; }
+
+    /* 飞行 token */
+    .token { position:absolute; left:0; top:0; width:38px; height:38px; margin:-19px 0 0 -19px; border-radius:50%; transform:translate3d(90px,90px,185px); background:var(--amber); color:#071015; display:grid; place-items:center; font:700 10px var(--mono); box-shadow:0 0 0 9px rgba(244,179,94,.13),0 0 34px rgba(244,179,94,.72); transition:transform .7s cubic-bezier(.22,.8,.25,1),background .3s,box-shadow .3s; z-index:4; }
+    .token::after { content:""; position:absolute; inset:-11px; border:1px solid currentColor; border-radius:50%; opacity:.5; animation:ping 1.9s ease-out infinite; }
+    @keyframes ping { from { transform:scale(.72); opacity:.7; } to { transform:scale(1.4); opacity:0; } }
+
+    /* ---------- HUD ---------- */
+    .hud { position:fixed; inset:0; pointer-events:none; padding:26px 30px; display:flex; flex-direction:column; justify-content:space-between; }
+    .header { max-width:720px; }
     .eyebrow { color:var(--amber); font:500 11px var(--mono); letter-spacing:.14em; text-transform:uppercase; }
-    h1 { font-size:clamp(30px,5vw,58px); line-height:1; font-weight:500; margin:10px 0 12px; letter-spacing:.01em; }
-    .subtitle { color:var(--muted); max-width:690px; line-height:1.6; margin:0; font-size:14px; }
-    .panel { pointer-events:auto; width:min(360px,calc(100vw - 60px)); margin-left:auto; background:rgba(7,16,21,.87); border:1px solid rgba(82,213,209,.3); padding:18px; backdrop-filter:blur(10px); }
-    .panel-label { color:var(--cyan); font:11px var(--mono); letter-spacing:.1em; text-transform:uppercase; }
-    .phase { font-size:22px; margin:8px 0 4px; font-weight:500; }
-    .event { color:var(--muted); font-size:13px; line-height:1.6; min-height:45px; }
-    .metric { display:grid; grid-template-columns:1fr auto; gap:8px; border-top:1px solid rgba(49,66,75,.8); padding:8px 0; color:var(--muted); font:11px var(--mono); }
+    h1 { font-size:clamp(26px,4.4vw,50px); line-height:1.02; font-weight:500; margin:10px 0 10px; letter-spacing:.01em; }
+    .subtitle { color:var(--muted); max-width:640px; line-height:1.6; margin:0; font-size:13.5px; }
+    code { color:var(--amber); font-family:var(--mono); }
+
+    .row { display:flex; justify-content:space-between; align-items:flex-end; gap:20px; }
+
+    /* 左下：地址链路梯 */
+    .ladder { pointer-events:auto; width:min(340px,calc(100vw - 60px)); background:rgba(7,16,21,.86); border:1px solid rgba(82,213,209,.26); padding:14px 16px; backdrop-filter:blur(10px); }
+    .ladder-title { color:var(--cyan); font:11px var(--mono); letter-spacing:.1em; text-transform:uppercase; margin-bottom:10px; }
+    .rung { display:flex; gap:11px; align-items:flex-start; padding:7px 0; border-left:2px solid var(--line); padding-left:12px; margin-left:4px; position:relative; transition:border-color .3s; }
+    .rung::before { content:""; position:absolute; left:-6px; top:11px; width:9px; height:9px; border-radius:50%; background:#1b2a32; border:2px solid var(--line); transition:background .3s, border-color .3s, box-shadow .3s; }
+    .rung.on { border-color:var(--amber); }
+    .rung.on::before { background:var(--amber); border-color:var(--amber); box-shadow:0 0 12px rgba(244,179,94,.8); }
+    .rung h4 { margin:0 0 2px; font:600 12.5px var(--mono); color:var(--muted); letter-spacing:.02em; }
+    .rung.on h4 { color:var(--amber); }
+    .rung p { margin:0; color:var(--muted); font:10.5px/1.45 var(--mono); }
+
+    /* 右下：阶段面板 */
+    .panel { pointer-events:auto; width:min(360px,calc(100vw - 60px)); background:rgba(7,16,21,.88); border:1px solid rgba(82,213,209,.3); padding:17px; backdrop-filter:blur(10px); }
+    .panel-label { color:var(--cyan); font:11px var(--mono); letter-spacing:.1em; text-transform:uppercase; display:flex; justify-content:space-between; }
+    .phase { font-size:21px; margin:8px 0 5px; font-weight:500; }
+    .event { color:var(--muted); font-size:12.5px; line-height:1.6; min-height:56px; }
+    .metric { display:grid; grid-template-columns:1fr auto; gap:8px; border-top:1px solid rgba(49,66,75,.8); padding:7px 0; color:var(--muted); font:11px var(--mono); }
     .metric strong { color:var(--ink); font-weight:500; text-align:right; }
     .controls { display:flex; gap:7px; flex-wrap:wrap; margin-top:12px; }
     button { border:1px solid var(--line); background:#101b21; color:var(--ink); min-height:36px; padding:7px 11px; font:500 12px var(--sans); cursor:pointer; }
     button:hover,button:focus-visible { border-color:var(--cyan); outline:none; background:#162a31; }
-    .legend { pointer-events:auto; display:flex; gap:14px; flex-wrap:wrap; color:var(--muted); font:11px var(--mono); }
-    .legend span::before { content:""; display:inline-block; width:8px; height:8px; margin-right:6px; background:var(--amber); }
-    .legend span:nth-child(2)::before { background:var(--cyan); }
-    .legend span:nth-child(3)::before { background:var(--purple); }
-    .legend span:nth-child(4)::before { background:var(--green); }
-    .hint { color:var(--muted); font:10px var(--mono); margin-top:8px; }
-    code { color:var(--amber); font-family:var(--mono); }
-    @media (max-width:900px) { .world { transform:translate(-50%,-50%) rotateX(56deg) rotateY(-10deg) scale(.72); } }
-    @media (max-width:700px) { .hud { padding:18px; } .panel { width:min(390px,calc(100vw - 36px)); } .subtitle { font-size:12px; max-width:460px; } .header { max-width:520px; } .world { top:58%; transform:translate(-50%,-50%) rotateX(56deg) rotateY(-10deg) scale(.48); } .layer { width:400px; } }
-    @media (prefers-reduced-motion:reduce) { * { scroll-behavior:auto !important; } }
+    .hint { color:var(--muted); font:10px var(--mono); margin-top:9px; }
+
+    @media (max-width:1040px) { .ladder { display:none; } .row { justify-content:flex-end; } }
+    @media (max-width:900px) { .world { transform:translate(-50%,-50%) rotateX(58deg) rotateY(-12deg) scale(.66); } }
+    @media (max-width:700px) { .hud { padding:16px; } .panel { width:min(390px,calc(100vw - 32px)); } .subtitle { font-size:12px; max-width:440px; } .header { max-width:520px; } .world { top:56%; transform:translate(-50%,-50%) rotateX(58deg) rotateY(-12deg) scale(.44); } .layer { width:420px; } }
+    @media (prefers-reduced-motion:reduce) { .token::after { animation:none; } }
   </style>
 </head>
 <body>
-  <div id="scene" role="img" aria-label="三维内存地址流水线动画">
+  <div id="scene" role="img" aria-label="GPU 内存层级与地址链路三维动画">
     <div class="world" id="world">
-      <svg class="route" viewBox="0 0 860 560" aria-hidden="true"><polyline points="90,90 205,132 320,220 430,250 535,320 680,395 790,240"></polyline></svg>
-      <div class="cluster"><div class="cluster-label">GRID → BLOCK → WARP</div><div class="blocks"><div class="block"></div><div class="block"></div><div class="block"></div></div><div class="warp-label">SM / scheduler / 32 lanes</div></div>
-      <div class="stage-mark mark-code">code: idx = block × blockDim + lane</div>
-      <div class="stage-mark mark-address">address: base + idx × 4</div>
-      <div class="stage-mark mark-load">LDG.E / cache lookup</div>
-      <div class="stage-mark mark-store">STG.E / write back</div>
-      <div class="layer registers"><strong>REGISTERS</strong><small>per thread · ~1 cycle<br>idx / address / accumulator</small></div>
-      <div class="layer shared"><strong>SHARED + L1</strong><small>block / SM scope<br>tile reuse · on chip</small></div>
-      <div class="layer l2"><strong>L2 CACHE</strong><small>GPU wide<br>cache line / transaction</small></div>
-      <div class="layer vram"><strong>VRAM / HBM / GDDR</strong><small>global memory<br>hundreds of cycles</small></div>
+      <div class="shaft"></div>
+      <div class="cluster" id="cluster">
+        <div class="cluster-label">GRID → BLOCK → WARP</div>
+        <div class="blocks"><div class="block" id="blk0"></div><div class="block"></div><div class="block"></div></div>
+        <div class="warp-label">SM · scheduler · 32 lanes</div>
+      </div>
+
+      <div class="layer registers" id="L0">
+        <div class="lt"><strong>REGISTERS</strong><span class="cap">每线程 255 个 · ~256 KB / SM</span></div>
+        <div class="rt"><span class="cyc">~1 周期</span><span class="note">idx / 地址 / 累加器</span></div>
+      </div>
+      <div class="layer shared" id="L1">
+        <div class="lt"><strong>SHARED + L1</strong><span class="cap">每 block 48~99 KB · 片上</span></div>
+        <div class="rt"><span class="cyc">~20-30 周期</span><span class="note">tile 复用 · 手动管理</span></div>
+      </div>
+      <div class="layer l2" id="L2">
+        <div class="lt"><strong>L2 CACHE</strong><span class="cap">几十 MB · 全 GPU 共享</span></div>
+        <div class="rt"><span class="cyc">~200 周期</span><span class="note">cache line / 事务</span></div>
+      </div>
+      <div class="layer vram" id="L3">
+        <div class="lt"><strong>VRAM · HBM / GDDR</strong><span class="cap">24 / 48 GB · nvidia-smi 可见</span></div>
+        <div class="rt"><span class="cyc">~400-800 周期</span><span class="note">全局显存 · 合并访问</span></div>
+      </div>
+
       <div class="token" id="token">IDX</div>
     </div>
   </div>
+
   <div class="hud">
     <header class="header">
-      <div class="eyebrow">CUDA / MEMORY ADDRESS PIPELINE / 3D</div>
+      <div class="eyebrow">CUDA · 内存层级 × 地址链路 · 3D</div>
       <h1>从 threadIdx 到 VRAM</h1>
-      <p class="subtitle">旋转视角观察一条数据的路径：线程索引生成 <code>idx</code>，<code>idx * sizeof(float)</code> 形成字节地址，load/store 请求穿过寄存器、L1、L2，最终到达显存。</p>
+      <p class="subtitle">左侧是<strong>地址链路</strong>（代码层 → 逻辑层 → 地址层 → 硬件层），右侧是<strong>分级内存</strong>。拖动旋转、滚轮缩放，跟随 token 看一条数据如何算出 <code>idx</code>、换成字节地址、再逐层穿过寄存器 / L1 / L2 抵达显存。</p>
     </header>
-    <aside class="panel" aria-label="当前动画阶段">
-      <div class="panel-label">CURRENT STAGE <span id="step">01 / 07</span></div>
-      <div class="phase" id="phase">代码层</div>
-      <div class="event" id="event" aria-live="polite">blockIdx.x、blockDim.x 和 threadIdx.x 还只是三个整数。</div>
-      <div class="metric"><span>作用域</span><strong id="scope">Thread / lane</strong></div>
-      <div class="metric"><span>近似延迟</span><strong id="latency">寄存器中</strong></div>
-      <div class="metric"><span>当前表达式</span><strong id="expression">idx = ...</strong></div>
-      <div class="controls">
-        <button id="play" type="button">▶ 播放</button><button id="pause" type="button">Ⅱ 暂停</button><button id="prev" type="button">← 上一步</button><button id="next" type="button">下一步 →</button><button id="reset" type="button">↺ 重置</button>
-      </div>
-      <div class="hint">拖动旋转视角；滚轮缩放。数值是架构相关量级，不代表固定周期。</div>
-    </aside>
-    <div class="legend" aria-label="图例"><span>线程索引</span><span>地址 token</span><span>缓存层</span><span>显存结果</span></div>
+
+    <div class="row">
+      <!-- 地址链路梯 -->
+      <aside class="ladder" aria-label="地址链路四层">
+        <div class="ladder-title">地址链路 · Address Pipeline</div>
+        <div class="rung" id="R0"><div><h4>【代码层】</h4><p>blockIdx.x · blockDim.x · threadIdx.x　三个整数</p></div></div>
+        <div class="rung" id="R1"><div><h4>【逻辑层】</h4><p>idx = block × blockDim + thread　一维下标</p></div></div>
+        <div class="rung" id="R2"><div><h4>【地址层】</h4><p>base_addr + idx × 4　线性字节地址</p></div></div>
+        <div class="rung" id="R3"><div><h4>【硬件层】</h4><p>LDG.E / STG.E → L1 → L2 → HBM 显存</p></div></div>
+      </aside>
+
+      <!-- 阶段面板 -->
+      <aside class="panel" aria-label="当前动画阶段">
+        <div class="panel-label"><span>CURRENT STAGE</span><span id="step">01 / 08</span></div>
+        <div class="phase" id="phase">代码层</div>
+        <div class="event" id="event" aria-live="polite">blockIdx.x、blockDim.x 和 threadIdx.x 还只是三个整数。</div>
+        <div class="metric"><span>作用域</span><strong id="scope">Thread / lane</strong></div>
+        <div class="metric"><span>近似延迟</span><strong id="latency">寄存器中</strong></div>
+        <div class="metric"><span>当前表达式</span><strong id="expression">idx = ...</strong></div>
+        <div class="controls">
+          <button id="play" type="button">▶ 播放</button><button id="pause" type="button">Ⅱ 暂停</button><button id="prev" type="button">← 上一步</button><button id="next" type="button">下一步 →</button><button id="reset" type="button">↺ 重置</button>
+        </div>
+        <div class="hint">数值为架构相关量级，不代表固定周期。拖动旋转 · 滚轮缩放。</div>
+      </aside>
+    </div>
   </div>
+
   <script>
     (() => {
+      // 每个阶段: token 落点[x,y,z], 高亮的内存层 layer(0-3 或 -1), 地址链路梯 rung(0-3)
       const stages = [
-        {name:'代码层', event:'blockIdx.x、blockDim.x 和 threadIdx.x 还只是三个整数。', scope:'Thread / lane', latency:'寄存器中', expression:'idx = blockIdx.x × blockDim.x + threadIdx.x', point:[90,90,170], color:'#f4b35e'},
-        {name:'逻辑层', event:'三个整数被组合成一维数组下标 idx；它通常暂存在当前线程的寄存器里。', scope:'Thread / lane', latency:'约 1 周期', expression:'idx = 775', point:[205,132,150], color:'#f4b35e'},
-        {name:'地址层', event:'数组下标乘以元素大小，得到线性字节地址；float 通常占 4 字节。', scope:'Thread / lane', latency:'地址计算', expression:'base_addr + 775 × 4', point:[320,220,145], color:'#52d5d1'},
-        {name:'L1 / Shared', event:'SM 附近的片上层级先处理请求；shared memory 需要程序显式管理，L1 由硬件缓存。', scope:'SM / Block', latency:'数十周期量级', expression:'LDG.E → L1', point:[430,250,110], color:'#b5a0f4'},
-        {name:'L2 Cache', event:'L1 未命中时，访问整个 GPU 共享的 L2；命中可以避免访问更慢的显存。', scope:'GPU-wide', latency:'数十~数百周期', expression:'L1 miss → L2', point:[535,320,55], color:'#b5a0f4'},
-        {name:'VRAM / DRAM', event:'L2 未命中时，请求进入显存分区。一个 warp 的连续地址有机会合并成较少的内存事务。', scope:'Device global', latency:'数百周期量级', expression:'DRAM transaction', point:[680,395,0], color:'#8bd49c'},
-        {name:'写回结果', event:'store 指令沿缓存和显存路径写回 output[idx]；之后才能被后续阶段消费。', scope:'Device global', latency:'取决于命中和写回', expression:'STG.E → output[idx]', point:[790,240,145], color:'#8bd49c'}
+        {name:'代码层', event:'blockIdx.x、blockDim.x、threadIdx.x 还只是三个整数，躺在当前线程的寄存器里。', scope:'Thread / lane', latency:'寄存器中', expression:'blockIdx=3, blockDim=256, thread=7', point:[92,92,185], color:'#f4b35e', layer:0, rung:0, tag:'IDX'},
+        {name:'逻辑层', event:'三个整数组合成一维数组下标 idx，仍然是寄存器里的一个整数。', scope:'Thread / lane', latency:'~1 周期', expression:'idx = 3×256 + 7 = 775', point:[210,128,165], color:'#f4b35e', layer:0, rung:1, tag:'775'},
+        {name:'地址层', event:'下标乘以元素大小，得到线性字节地址；float 占 4 字节。显存本来就是一维的。', scope:'Thread / lane', latency:'地址计算', expression:'base_addr + 775 × 4', point:[300,196,120], color:'#52d5d1', layer:0, rung:2, tag:'ADDR'},
+        {name:'硬件层 · 发射', event:'编译器生成 LDG.E 取数指令；一个 warp 的 32 条 lane 地址相邻，有机会合并成少量事务。', scope:'Warp / SM', latency:'指令发射', expression:'LDG.E  [addr]', point:[300,232,70], color:'#52d5d1', layer:1, rung:3, tag:'LDG'},
+        {name:'L1 / Shared', event:'先问 SM 附近的片上层级：shared memory 要程序显式管理，L1 由硬件自动缓存。', scope:'SM / Block', latency:'~20-30 周期', expression:'L1 lookup', point:[300,236,65], color:'#52d5d1', layer:1, rung:3, tag:'L1'},
+        {name:'L2 Cache', event:'L1 未命中则访问整个 GPU 共享的 L2；命中就不必再走更慢的显存。', scope:'GPU-wide', latency:'~200 周期', expression:'L1 miss → L2', point:[300,270,5], color:'#b5a0f4', layer:2, rung:3, tag:'L2'},
+        {name:'VRAM · HBM', event:'L2 也未命中，请求落到显存分区。连续地址被合并成较少的 DRAM 事务，这就是 nvidia-smi 看到的那块显存。', scope:'Device global', latency:'~400-800 周期', expression:'DRAM transaction', point:[300,340,-60], color:'#8bd49c', layer:3, rung:3, tag:'VRAM'},
+        {name:'写回结果', event:'store 指令沿缓存与显存反向写回 output[idx]，之后才能被下一阶段消费。', scope:'Device global', latency:'取决于命中与写回', expression:'STG.E → output[775]', point:[150,120,185], color:'#8bd49c', layer:0, rung:3, tag:'STG'}
       ];
-      const token = document.getElementById('token');
-      const world = document.getElementById('world');
-      let current=0, timer=null, playing=false, drag=false, lastX=0, angle=-10, zoom=.92;
       const $=id=>document.getElementById(id);
-      function updatePanel(){ const s=stages[current]; $('step').textContent=String(current+1).padStart(2,'0')+' / 07'; $('phase').textContent=s.name; $('event').textContent=s.event; $('scope').textContent=s.scope; $('latency').textContent=s.latency; $('expression').textContent=s.expression; token.style.background=s.color; token.style.boxShadow='0 0 0 8px '+s.color+'22,0 0 30px '+s.color+'b8'; token.style.transform='translate3d('+s.point[0]+'px,'+s.point[1]+'px,'+s.point[2]+'px)'; token.textContent=current<3?'IDX':current<5?'L1':'VRAM'; }
-      function next(){ current=(current+1)%stages.length; updatePanel(); }
-      function prev(){ current=(current-1+stages.length)%stages.length; updatePanel(); }
-      function play(){ playing=true; if(!timer) timer=setInterval(()=>{if(playing) next();},1800); }
-      function pause(){ playing=false; clearInterval(timer); timer=null; }
-      $('play').onclick=play; $('pause').onclick=pause; $('next').onclick=next; $('prev').onclick=prev; $('reset').onclick=()=>{pause();current=0;updatePanel();};
-      function renderWorld(){ world.style.transform='translate(-50%,-50%) rotateX(56deg) rotateY('+angle+'deg) scale('+zoom+')'; }
-      $('scene').addEventListener('pointerdown',e=>{drag=true;lastX=e.clientX;}); window.addEventListener('pointerup',()=>{drag=false;}); window.addEventListener('pointermove',e=>{if(drag){angle+=(e.clientX-lastX)*.35;lastX=e.clientX;renderWorld();}}); $('scene').addEventListener('wheel',e=>{zoom=Math.max(.38,Math.min(1.16,zoom-e.deltaY*.0008));renderWorld();},{passive:true});
+      const token=$('token'), world=$('world');
+      const layers=[$('L0'),$('L1'),$('L2'),$('L3')];
+      const rungs=[$('R0'),$('R1'),$('R2'),$('R3')];
+      let current=0, timer=null, playing=false, drag=false, lastX=0, angle=-12, zoom=.9;
+
+      function updatePanel(){
+        const s=stages[current];
+        $('step').textContent=String(current+1).padStart(2,'0')+' / 08';
+        $('phase').textContent=s.name; $('event').textContent=s.event;
+        $('scope').textContent=s.scope; $('latency').textContent=s.latency; $('expression').textContent=s.expression;
+        token.style.background=s.color;
+        token.style.boxShadow='0 0 0 9px '+s.color+'22,0 0 34px '+s.color+'b8';
+        token.style.transform='translate3d('+s.point[0]+'px,'+s.point[1]+'px,'+s.point[2]+'px)';
+        token.textContent=s.tag;
+        layers.forEach((el,i)=>el.classList.toggle('hot', i===s.layer));
+        rungs.forEach((el,i)=>el.classList.toggle('on', i<=s.rung));
+        $('blk0').classList.toggle('lit', current<3);
+      }
+      const next=()=>{current=(current+1)%stages.length; updatePanel();};
+      const prev=()=>{current=(current-1+stages.length)%stages.length; updatePanel();};
+      const play=()=>{playing=true; if(!timer) timer=setInterval(()=>{if(playing) next();},2000);};
+      const pause=()=>{playing=false; clearInterval(timer); timer=null;};
+      $('play').onclick=play; $('pause').onclick=pause; $('next').onclick=next; $('prev').onclick=prev;
+      $('reset').onclick=()=>{pause(); current=0; updatePanel();};
+
+      function renderWorld(){ world.style.transform='translate(-50%,-50%) rotateX(58deg) rotateY('+angle+'deg) scale('+zoom+')'; }
+      $('scene').addEventListener('pointerdown',e=>{drag=true;lastX=e.clientX;});
+      window.addEventListener('pointerup',()=>{drag=false;});
+      window.addEventListener('pointermove',e=>{if(drag){angle+=(e.clientX-lastX)*.35;lastX=e.clientX;renderWorld();}});
+      $('scene').addEventListener('wheel',e=>{zoom=Math.max(.36,Math.min(1.2,zoom-e.deltaY*.0008));renderWorld();},{passive:true});
+      document.addEventListener('keydown',e=>{if(e.key==='ArrowRight')next();if(e.key==='ArrowLeft')prev();});
+
       updatePanel(); renderWorld();
     })();
   </script>
