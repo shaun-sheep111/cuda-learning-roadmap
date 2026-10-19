@@ -15,6 +15,8 @@
 - [并行计算思维](../parallel_thinking/)：从任务拆分、依赖、通信、同步和性能模型出发设计算法。
 - [GPU 硬件工作流程](architecture_workflow.md)：跟踪 kernel 从 CPU 入队、block 分发、warp 发射、内存访问到结果写回的全过程。
 - [GPU 工作流程动画](gpu_workflow_animation.html)：用播放和单步操作观察一次向量加法的完整数据路径。
+- [从线程索引到显存地址](memory_address_pipeline.md)：理解 `blockIdx/blockDim/threadIdx → idx → 字节地址 → L1/L2/VRAM`。
+- [内存地址 3D 动画](memory_address_3d.html)：用 3D token 观察地址和内存层级的变化。
 
 推荐顺序：先读并行计算思维，再读硬件工作流程，最后运行本目录的查询和带宽实验。
 

@@ -90,6 +90,8 @@ sequenceDiagram
 
 H2D/D2H 是 CPU 与 GPU 的通信，L2/显存是 GPU 内的数据路径，寄存器和 shared memory 是 SM 内的高速数据路径。动画版可以[打开 GPU Workflow Lab](https://shaun-sheep111.github.io/cuda-learning-roadmap/hardware_basics/gpu_workflow_animation.html)，用播放或单步观察这七个阶段。
 
+如果想继续追踪“一个线程如何变成一次显存访问”，可以查看[从线程索引到显存地址的 3D 动画](https://shaun-sheep111.github.io/cuda-learning-roadmap/hardware_basics/memory_address_3d.html)，它展示 `blockIdx/blockDim/threadIdx → idx → base_addr + idx * sizeof(float) → L1/L2/VRAM`。
+
 ### 4. 并行计算方式速查
 
 | 并行方式 | 如何拆分 | CUDA / AI Infra 例子 |
@@ -123,6 +125,7 @@ CUDA 代码只是 GPU 编程接口。学习路线还需要回答两个更底层�
 | 第 1 章 | GPU 硬件基础：GPU 总体结构、Grid/Block/Warp/SM、计算管线、内存和 DMA | [`hardware_basics/README.md`](hardware_basics/README.md) |
 | 第 1 章图解 | 硬件工作流程、Mermaid 结构图、CPU-GPU 时序图 | [`hardware_basics/architecture_workflow.md`](hardware_basics/architecture_workflow.md) |
 | 第 1 章动画 | 用单步或播放观察一次向量加法的硬件路径 | [`hardware_basics/gpu_workflow_animation.html`](hardware_basics/gpu_workflow_animation.html) |
+| 第 1 章地址动画 | 3D 展示线程索引、字节地址、缓存和显存链路 | [`hardware_basics/memory_address_3d.html`](hardware_basics/memory_address_3d.html) |
 | 第 2 章 | CUDA 基础：kernel、线程层级、内存、错误处理和计时 | [`week1_basics/`](week1_basics/) |
 | 第 3 章 | 内存模型：shared、constant、texture、coalescing、pinned memory | [`week2_memory/`](week2_memory/) |
 | 第 4 章 | 并行模式：reduce、scan、tiling、histogram、sort | [`week3_patterns/`](week3_patterns/) |

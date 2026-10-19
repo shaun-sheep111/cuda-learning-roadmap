@@ -6,6 +6,8 @@ CUDA 是编程接口和执行模型；GPU 是真正执行指令、搬运数据�
 
 配套的交互式动画：[`gpu_workflow_animation.html`](gpu_workflow_animation.html)。打开后点击“播放”或“单步”，可以观察一次向量加法在各个硬件阶段之间移动。
 
+地址链路配套章节：[`memory_address_pipeline.md`](memory_address_pipeline.md)；3D 版本：[`memory_address_3d.html`](memory_address_3d.html)。
+
 ## 0. 先看两张图
 
 ### 0.1 一张总地图：物理 GPU、CUDA 抽象和数据路径
