@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SGEMM 优化链 · 从 tiled 到接近 cuBLAS</title>
+<style>
+  :root{
+    --ink:#e8edf2; --muted:#98a7b6; --line:#31414c;
+    --panel:#101a20; --panel-2:#14242c; --bg:#071015;
+    --amber:#f4b35e; --cyan:#52d5d1; --green:#8bd49c; --red:#f07878; --purple:#b5a0f4;
+    --mono:"SFMono-Regular","Cascadia Code","Liberation Mono",monospace;
+    --sans:"Avenir Next","PingFang SC","Hiragino Sans GB",sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;color:var(--ink);
+    background:linear-gradient(rgba(82,213,209,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(82,213,209,.045) 1px,transparent 1px),var(--bg);
+    background-size:32px 32px;font-family:var(--sans);min-width:320px;}
+  .shell{max-width:1140px;margin:0 auto;padding:36px 24px 60px;}
+  .eyebrow{color:var(--amber);font:500 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;}
+  h1{font-size:clamp(26px,4.2vw,44px);line-height:1.08;margin:12px 0 14px;font-weight:500;}
+  .lede{color:var(--muted);max-width:760px;line-height:1.7;margin:0;}
+  h2{font-size:20px;font-weight:500;margin:36px 0 10px;border-left:3px solid var(--cyan);padding-left:10px;}
+  h3{font-size:15px;font-weight:600;margin:0 0 8px;}
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:22px 0 10px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);}
+  button{font:500 13px var(--sans);color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:9px 14px;cursor:pointer;transition:.15s;}
+  button:hover{border-color:var(--cyan);color:var(--cyan);}
+  button.primary{background:var(--cyan);color:#06222a;border-color:var(--cyan);font-weight:600;}
+  .steps{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto;}
+  .steps button{font-size:12px;padding:8px 11px;}
+  .steps button.active{background:var(--amber);color:#2a1c05;border-color:var(--amber);font-weight:600;}
+  /* 速度条 */
+  .perf{display:flex;align-items:flex-end;gap:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:20px 20px 14px;margin-top:8px;height:210px;}
+  .bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:6px;}
+  .bar{width:100%;max-width:70px;border-radius:6px 6px 0 0;background:var(--panel-2);transition:height .5s cubic-bezier(.2,.8,.2,1), background .3s;position:relative;}
+  .bar .val{position:absolute;top:-20px;left:50%;transform:translateX(-50%);font:600 12px var(--mono);color:var(--ink);white-space:nowrap;}
+  .bar-wrap .lbl{font:500 11px var(--sans);color:var(--muted);text-align:center;line-height:1.3;min-height:30px;}
+  .bar-wrap.on .bar{background:linear-gradient(var(--cyan),var(--green));box-shadow:0 0 16px rgba(82,213,209,.4);}
+  .bar-wrap.dim{opacity:.4;}
+  /* 解说 + 代码 */
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;}
+  @media(max-width:760px){.row{grid-template-columns:1fr;}}
+  .narrate{border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:0 10px 10px 0;background:var(--panel-2);padding:14px 16px;line-height:1.65;}
+  .narrate b{color:var(--amber);} .narrate .k{color:var(--ink);font-weight:600;}
+  pre{margin:0;border:1px solid var(--line);border-radius:10px;background:#050d11;padding:14px;overflow-x:auto;font:400 12px/1.5 var(--mono);color:var(--ink);}
+  pre .c{color:var(--muted);} pre .kw{color:var(--purple);} pre .hl{color:var(--amber);}
+  /* 定量面板 */
+  .metrics{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;}
+  .met{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 16px;min-width:140px;}
+  .met .k{font:500 11px var(--mono);color:var(--muted);letter-spacing:.05em;}
+  .met .v{font:700 20px var(--mono);margin-top:3px;color:var(--cyan);}
+  .met .sub{font:400 10px var(--mono);color:var(--muted);margin-top:2px;}
+  table{width:100%;border-collapse:collapse;margin-top:14px;font-size:12.5px;}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;}
+  th{background:var(--panel-2);color:var(--cyan);font-weight:600;}
+  td{color:var(--muted);} td code,.narrate code{font:400 12px var(--mono);background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px;color:var(--amber);}
+  .note{margin-top:14px;border:1px solid var(--line);border-left:3px solid var(--green);border-radius:0 10px 10px 0;background:var(--panel-2);padding:14px 16px;line-height:1.65;font-size:13px;}
+  .note b{color:var(--green);} .note .k{color:var(--ink);font-weight:600;}
+  .foot{margin-top:30px;color:var(--muted);font-size:12px;line-height:1.7;border-top:1px solid var(--line);padding-top:16px;}
+  a{color:var(--cyan);}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="eyebrow">hardware_basics · SGEMM 进阶优化</div>
+  <h1>SGEMM 优化链：从 tiled 到接近 cuBLAS</h1>
+  <p class="lede">
+    day14 的 register tiling 只是起点。真正逼近 cuBLAS 还要：<b class="k" style="color:var(--ink)">block/thread 两层分块、float4 向量化、双缓冲、消除 bank conflict</b>。
+    每一步点开看它<b style="color:var(--ink)">加速多少、为什么、以及在 RTX 4090 上的寄存器/共享内存/occupancy 代价</b>。
+  </p>
+
+  <div class="toolbar">
+    <span style="font:500 12px var(--mono);color:var(--muted)">点击每一步 →</span>
+    <div class="steps" id="steps"></div>
+  </div>
+
+  <!-- 相对速度条 -->
+  <div class="perf" id="perf"></div>
+
+  <div class="row">
+    <div class="narrate" id="narrate"></div>
+    <pre id="code"></pre>
+  </div>
+
+  <div class="metrics" id="metrics"></div>
+
+  <h2>各阶段 occupancy 定量（RTX 4090 / sm_89）</h2>
+  <table>
+    <tr><th>阶段</th><th>每block线程</th><th>共享内存/block</th><th>寄存器/线程</th><th>限制因素</th><th>同驻block</th><th>occupancy</th></tr>
+    <tr><td>基础 tiled 32×32</td><td>1024</td><td>8 KB</td><td>~40</td><td>线程数&寄存器</td><td>1</td><td>~67%</td></tr>
+    <tr><td>register tiling 8×8</td><td>256</td><td>8 KB</td><td>~100</td><td><b style="color:var(--amber)">寄存器</b></td><td>2</td><td>~33%</td></tr>
+    <tr><td>+ float4</td><td>256</td><td>8 KB</td><td>~96</td><td>寄存器</td><td>2</td><td>~33%</td></tr>
+    <tr><td>+ double buffering</td><td>256</td><td><b style="color:var(--amber)">16 KB</b></td><td>~110</td><td>寄存器&共享内存</td><td>2</td><td>~33%</td></tr>
+    <tr><td>+ bank conflict free</td><td>256</td><td>~17 KB(padding)</td><td>~110</td><td>寄存器</td><td>2</td><td>~33%</td></tr>
+  </table>
+
+  <div class="note">
+    <b>最反直觉的一点</b>：register tiling 后 occupancy 从 67% <b>降到 33%</b>（被寄存器限制），
+    <b class="k">但速度反而大涨</b>。因为性能的关键不是"同时跑多少 warp"，而是
+    <b class="k">算术强度（每次访存配多少计算）和 ILP（指令级并行）</b>。
+    每线程算 8×8=64 个元素 → 访存少、独立 FMA 多 → 单个 warp 就能把计算管线喂饱。
+    <b>所以"occupancy 越高越快"是错的</b>，要看瓶颈到底是访存还是计算。
+  </div>
+
+  <h2>RTX 4090 硬件预算（为什么参数不能无限开大）</h2>
+  <table>
+    <tr><th>资源 (每 SM)</th><th>上限</th><th>对参数的约束</th></tr>
+    <tr><td>寄存器文件</td><td>65536 个</td><td>每线程寄存器 × 线程数 不能超；TM×TN 越大越吃寄存器</td></tr>
+    <tr><td>每线程最大寄存器</td><td>255</td><td>超过会 spill 到本地内存（慢），得砍 TM×TN</td></tr>
+    <tr><td>共享内存</td><td>100 KB</td><td>BM×BK + BK×BN 的 tile；双缓冲翻倍</td></tr>
+    <tr><td>最大并发 warp</td><td>48（1536 线程）</td><td>block 线程数 × 同驻 block 数 的上限</td></tr>
+    <tr><td>最大 block/SM</td><td>24</td><td>block 太小也浪费</td></tr>
+  </table>
+
+  <div class="foot">
+    <p><b>配套代码起点</b>：<a href="../week2_memory/day14_week2_review.cu">week2_memory/day14_week2_review.cu</a>（含朴素/基础tiled/8×8 register 三版本）。本页的 float4/双缓冲/bank-conflict 优化是在其基础上的进阶，详见 <a href="sgemm_optimize.md">讲解 md</a>。</p>
+    <p><b>延伸</b>：<a href="tiled_matmul.md">分块矩阵乘法(基础)</a> ｜ <a href="sync_async_transfer.md">同步vs异步传输</a> ｜ <a href="README.md">返回硬件基础</a></p>
+    <p>速度条为<b>相对示意</b>（典型趋势），真实加速比取决于矩阵尺寸与 profile 结果，请在 4090 上用 Nsight Compute 实测。</p>
+  </div>
+</div>
+
+<script>
+// 每一步: 名称, 相对速度(示意), 解说, 代码, 定量指标
+const STAGES=[
+  {name:'①朴素', speed:1, color:'red',
+   narr:'<b>起点</b>：每线程算 C 的 <span class="k">1 个</span>元素，内层循环每次都读<span class="k">全局内存</span>。数据零复用，带宽瓶颈。',
+   code:`<span class="c">// 每次乘加都打全局内存</span>\n<span class="kw">for</span>(i=0;i&lt;K;i++)\n  sum += A[row*K+i]\n       * B[i*N+col];`,
+   met:[['相对速度','1×'],['算术强度','极低'],['瓶颈','全局带宽']]},
+
+  {name:'②tiled 32×32', speed:6, color:'amber',
+   narr:'<b>共享内存分块</b>：把 A、B 的 <code>32×32</code> tile 搬进<span class="k">共享内存</span>，block 内线程复用。全局读降到 <span class="k">1/32</span>。',
+   code:`__shared__ <span class="kw">float</span> sA[32][32];\n__shared__ <span class="kw">float</span> sB[32][32];\nsA[ty][tx]=A[...]; sB[ty][tx]=B[...];\n__syncthreads();\n<span class="kw">for</span>(i..32) sum+=sA[ty][i]*sB[i][tx];`,
+   met:[['相对速度','~6×'],['共享内存','8KB/block'],['occupancy','~67%']]},
+
+  {name:'③BM×BN + TM×TN', speed:20, color:'amber',
+   narr:'<b>两层分块(register tiling)</b>：block 层算 <code>BM×BN=128×128</code>，每<span class="k">线程</span>再算 <code>TM×TN=8×8=64</code> 个元素，中间结果放<span class="k">寄存器</span>。算术强度暴涨。',
+   code:`<span class="c">// block tile + thread tile</span>\n<span class="kw">float</span> acc[8][8]={0}; <span class="c">// 寄存器</span>\n<span class="kw">for</span>(kk..BK){\n  <span class="kw">for</span>(i..8) a[i]=sA[ty*8+i][kk];\n  <span class="kw">for</span>(j..8) b[j]=sB[kk][tx*8+j];\n  <span class="kw">for</span>(i..8)<span class="kw">for</span>(j..8)\n    acc[i][j]=fma(a[i],b[j],acc[i][j]);\n}`,
+   met:[['相对速度','~20×'],['寄存器/线程','~100'],['occupancy','~33% ⚠']]},
+
+  {name:'④float4 向量化', speed:28, color:'cyan',
+   narr:'<b>float4 加载</b>：用 <code>float4</code> 一条指令读 <span class="k">128bit=4 个 float</span>，访存指令数减到 1/4，带宽利用率↑、指令发射压力↓。',
+   code:`<span class="c">// 一次搬 4 个 float</span>\nfloat4 v = *(float4*)&amp;A[idx];\n<span class="c">// 等价于 4 次标量 load，</span>\n<span class="c">// 但只发 1 条访存指令</span>\nreinterpret_cast&lt;float4*&gt;(sA)[k]=v;`,
+   met:[['相对速度','~28×'],['访存指令','×1/4'],['对齐要求','16B']]},
+
+  {name:'⑤double buffering', speed:36, color:'cyan',
+   narr:'<b>双缓冲</b>：开两份共享内存。<span class="k">计算当前 tile 的同时</span>，异步预取下一块 tile，隐藏共享内存加载延迟，去掉一次 <code>__syncthreads</code> 等待。',
+   code:`__shared__ <span class="kw">float</span> sA[2][BM][BK]; <span class="c">// 双份</span>\n<span class="kw">int</span> cur=0;\nload(sA[cur]);\n<span class="kw">for</span>(t..){\n  prefetch(sA[cur^1]); <span class="c">// 预取下一块</span>\n  compute(sA[cur]);    <span class="c">// 同时算这块</span>\n  cur^=1;\n}`,
+   met:[['相对速度','~36×'],['共享内存','16KB(×2)'],['收益','隐藏加载延迟']]},
+
+  {name:'⑥bank conflict free', speed:42, color:'green',
+   narr:'<b>消除 bank conflict</b>：共享内存分 32 个 bank，同 warp 访问同 bank 会<span class="k">串行</span>。用 <code>padding</code>（如 <code>[BK][BM+4]</code>）或 swizzle 打散地址，让 32 线程命中 32 个不同 bank。',
+   code:`<span class="c">// padding 多 4 列错开 bank</span>\n__shared__ <span class="kw">float</span> sA[BK][BM+4];\n<span class="c">// 原本列访问全撞 bank0，</span>\n<span class="c">// +4 后每线程落到不同 bank</span>\n<span class="c">// → 共享内存吞吐翻倍</span>`,
+   met:[['相对速度','~42×'],['共享吞吐','×~2'],['代价','少量padding']]},
+];
+
+const C={red:'var(--red)',amber:'var(--amber)',cyan:'var(--cyan)',green:'var(--green)'};
+let cur=0;
+const maxSpeed=Math.max(...STAGES.map(s=>s.speed));
+
+// 渲染步骤按钮
+const stepsEl=document.getElementById('steps');
+STAGES.forEach((s,i)=>{
+  const b=document.createElement('button');
+  b.textContent=s.name; b.onclick=()=>sel(i);
+  stepsEl.appendChild(b);
+});
+// 渲染速度条
+const perfEl=document.getElementById('perf');
+STAGES.forEach((s,i)=>{
+  const w=document.createElement('div'); w.className='bar-wrap'; w.id='bw'+i;
+  w.innerHTML=`<div class="bar" id="bar${i}"><span class="val">${s.speed}×</span></div><div class="lbl">${s.name}</div>`;
+  perfEl.appendChild(w);
+});
+function layoutBars(){
+  STAGES.forEach((s,i)=>{
+    const bar=document.getElementById('bar'+i);
+    bar.style.height=(s.speed/maxSpeed*140+8)+'px';
+  });
+}
+function sel(i){
+  cur=i;
+  document.querySelectorAll('#steps button').forEach((b,j)=>b.classList.toggle('active',j===i));
+  STAGES.forEach((s,j)=>{
+    const w=document.getElementById('bw'+j);
+    w.classList.toggle('on',j<=i);
+    w.classList.toggle('dim',j>i);
+  });
+  const s=STAGES[i];
+  document.getElementById('narrate').innerHTML=s.narr;
+  document.getElementById('code').innerHTML=s.code;
+  const m=document.getElementById('metrics');
+  m.innerHTML=s.met.map(([k,v])=>`<div class="met"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+}
+layoutBars();
+sel(0);
+</script>
+</body>
+</html>

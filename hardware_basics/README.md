@@ -17,6 +17,9 @@
 - [GPU 工作流程动画](gpu_workflow_animation.html)：用播放和单步操作观察一次向量加法的完整数据路径。
 - [从线程索引到显存地址](memory_address_pipeline.md)：理解 `blockIdx/blockDim/threadIdx → idx → 字节地址 → L1/L2/VRAM`。
 - [内存地址 3D 动画](memory_address_3d.html)：用 3D token 观察地址和内存层级的变化。本地双击打开即可；也可[在线查看（htmlpreview）](https://htmlpreview.github.io/?https://github.com/shaun-sheep111/cuda-learning-roadmap/blob/main/hardware_basics/memory_address_3d.html)，拖动旋转、滚轮缩放、方向键步进。
+- [同步 vs 异步传输](sync_async_transfer.md)：讲清同步 / 单 stream 异步 / 双 stream pipeline 三种传输方式、各需哪些 GPU 结构、什么场景用哪种（Day 13 配套）。配套[动画（在线查看）](https://shaun-sheep111.github.io/cuda-learning-roadmap/hardware_basics/sync_async_transfer.html)可播放/单步看传输与计算如何重叠。
+- [分块矩阵乘法](tiled_matmul.md)：讲清分块(tiling)为什么快、朴素/基础tiled/8×8 register 三版本对比、以及 TILE_SIZE/BM/BN/BK/每线程元素等参数如何设计（Day 14 配套）。配套[动画（在线查看）](https://shaun-sheep111.github.io/cuda-learning-roadmap/hardware_basics/tiled_matmul.html)用"数内存访问次数"看清复用带来的加速。
+- [SGEMM 优化链（进阶）](sgemm_optimize.md)：从 tiled 继续推进到接近 cuBLAS —— BM×BN/TM×TN 两层分块、float4 向量化、双缓冲、消除 bank conflict，含 RTX 4090 的寄存器/共享内存/occupancy 定量分析。配套[动画（在线查看）](https://shaun-sheep111.github.io/cuda-learning-roadmap/hardware_basics/sgemm_optimize.html)逐步点看每步加速与代价。
 
 推荐顺序：先读并行计算思维，再读硬件工作流程，最后运行本目录的查询和带宽实验。
 

@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>同步 vs 异步传输 · 动画讲解</title>
+<style>
+  :root{
+    --ink:#e8edf2; --muted:#98a7b6; --line:#31414c;
+    --panel:#101a20; --panel-2:#14242c; --bg:#071015;
+    --amber:#f4b35e; --cyan:#52d5d1; --green:#8bd49c; --red:#f07878; --purple:#b5a0f4;
+    --mono:"SFMono-Regular","Cascadia Code","Liberation Mono",monospace;
+    --sans:"Avenir Next","PingFang SC","Hiragino Sans GB",sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;color:var(--ink);
+    background:
+      linear-gradient(rgba(82,213,209,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(82,213,209,.045) 1px,transparent 1px),
+      var(--bg);
+    background-size:32px 32px;font-family:var(--sans);min-width:320px;
+  }
+  .shell{max-width:1120px;margin:0 auto;padding:36px 24px 60px;}
+  .eyebrow{color:var(--amber);font:500 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;}
+  h1{font-size:clamp(28px,4.5vw,48px);line-height:1.05;margin:12px 0 14px;font-weight:500;}
+  .lede{color:var(--muted);max-width:720px;line-height:1.7;margin:0;}
+  h2{font-size:20px;font-weight:500;margin:34px 0 10px;border-left:3px solid var(--cyan);padding-left:10px;}
+  .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:24px 0 10px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);}
+  button{font:500 13px var(--sans);color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;cursor:pointer;transition:.15s;}
+  button:hover{border-color:var(--cyan);color:var(--cyan);}
+  button:disabled{opacity:.4;cursor:not-allowed;}
+  button.primary{background:var(--cyan);color:#06222a;border-color:var(--cyan);font-weight:600;}
+  .mode-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto;}
+  .mode-tabs button.active{background:var(--amber);color:#2a1c05;border-color:var(--amber);font-weight:600;}
+  .stage-label{font:500 12px var(--mono);color:var(--muted);letter-spacing:.08em;}
+  /* 泳道时间线 */
+  .lanes{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:18px;margin-top:8px;overflow-x:auto;}
+  .lane{display:flex;align-items:center;gap:0;margin:9px 0;min-width:640px;}
+  .lane-name{width:160px;flex:none;font:500 13px var(--sans);color:var(--ink);display:flex;align-items:center;gap:8px;}
+  .lane-name small{color:var(--muted);font:400 11px var(--mono);}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;}
+  .track{flex:1;position:relative;height:34px;background:rgba(255,255,255,.03);border-radius:6px;overflow:hidden;}
+  .blk{position:absolute;top:4px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;font:600 11px var(--mono);color:#06141a;opacity:.25;transition:opacity .25s, box-shadow .25s;white-space:nowrap;}
+  .blk.on{opacity:1;box-shadow:0 0 0 1px rgba(255,255,255,.25),0 0 14px rgba(82,213,209,.35);}
+  .blk.h2d{background:var(--cyan);}
+  .blk.comp{background:var(--amber);}
+  .blk.d2h{background:var(--green);}
+  .playhead{position:absolute;top:-18px;bottom:-9px;width:2px;background:var(--red);box-shadow:0 0 8px var(--red);transition:left .12s linear;z-index:5;}
+  .axis{min-width:640px;display:flex;justify-content:space-between;font:400 10px var(--mono);color:var(--muted);padding:6px 0 0 160px;}
+  /* 解说 */
+  .narrate{margin-top:14px;border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:0 10px 10px 0;background:var(--panel-2);padding:14px 16px;min-height:72px;}
+  .narrate b{color:var(--amber);}
+  .struct{margin-top:8px;font:400 12px var(--mono);color:var(--cyan);}
+  /* 对比卡片 */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:14px;}
+  .card{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px;}
+  .card h3{margin:0 0 8px;font-size:15px;font-weight:600;}
+  .card.sync h3{color:var(--red);}
+  .card.single h3{color:var(--purple);}
+  .card.pipe h3{color:var(--green);}
+  .card p{margin:6px 0;font-size:13px;color:var(--muted);line-height:1.6;}
+  .card .tag{display:inline-block;font:500 11px var(--mono);padding:2px 8px;border-radius:5px;background:rgba(82,213,209,.12);color:var(--cyan);margin:3px 4px 0 0;}
+  table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px;}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;}
+  th{background:var(--panel-2);color:var(--cyan);font-weight:600;}
+  td{color:var(--muted);}
+  .foot{margin-top:30px;color:var(--muted);font-size:12px;line-height:1.7;border-top:1px solid var(--line);padding-top:16px;}
+  a{color:var(--cyan);}
+  code{font:400 12px var(--mono);background:rgba(255,255,255,.06);padding:1px 6px;border-radius:4px;color:var(--amber);}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="eyebrow">hardware_basics · Day13 配套</div>
+  <h1>同步 vs 异步传输</h1>
+  <p class="lede">
+    数据要在 CPU 和 GPU 之间来回搬。<b style="color:var(--ink)">怎么搬</b>决定了快慢。
+    这个动画把 Day 13 代码里的三种方式——同步串行、单 stream 异步、双 stream pipeline——
+    画成时间线，让你亲眼看到<b style="color:var(--ink)">"重叠"</b>是怎么省时间的，以及背后用到哪些 GPU 结构。
+  </p>
+
+  <h2>一次向量计算：传入 → 计算 → 传回</h2>
+  <div class="toolbar">
+    <button id="play" class="primary">▶ 播放</button>
+    <button id="step">单步 ▸</button>
+    <button id="reset">↺ 重置</button>
+    <span class="stage-label" id="clock">t = 0</span>
+    <div class="mode-tabs">
+      <button data-mode="sync" class="active">① 同步串行</button>
+      <button data-mode="single">② 单 stream 异步</button>
+      <button data-mode="pipe">③ 双 stream pipeline</button>
+    </div>
+  </div>
+
+  <div class="lanes">
+    <div class="lane">
+      <div class="lane-name"><span class="dot" style="background:var(--cyan)"></span>Copy Engine ①<small>H2D 入</small></div>
+      <div class="track" id="trk-h2d"><div class="playhead" id="ph1"></div></div>
+    </div>
+    <div class="lane">
+      <div class="lane-name"><span class="dot" style="background:var(--amber)"></span>SM 计算单元<small>kernel</small></div>
+      <div class="track" id="trk-comp"><div class="playhead" id="ph2"></div></div>
+    </div>
+    <div class="lane">
+      <div class="lane-name"><span class="dot" style="background:var(--green)"></span>Copy Engine ②<small>D2H 回</small></div>
+      <div class="track" id="trk-d2h"><div class="playhead" id="ph3"></div></div>
+    </div>
+    <div class="axis"><span>0</span><span>时间 →</span><span id="axis-end">24</span></div>
+  </div>
+
+  <div class="narrate" id="narrate">选一种模式，点 <b>▶ 播放</b> 或 <b>单步</b> 开始。</div>
+  <div class="struct" id="struct"></div>
+
+  <h2>三种方式对比</h2>
+  <div class="grid">
+    <div class="card sync">
+      <h3>① 同步串行</h3>
+      <p>三步一个接一个，中间 CPU 一直等。最简单，也最慢——同一时刻只有一个部件在干活，其他全在空转。</p>
+      <p><span class="tag">cudaMemcpy</span><span class="tag">普通 malloc 也行</span></p>
+      <p><b style="color:var(--ink)">用在</b>：调试、数据量小、只跑一次、对性能不敏感。</p>
+    </div>
+    <div class="card single">
+      <h3>② 单 stream 异步</h3>
+      <p>用 <code>cudaMemcpyAsync</code> 让 CPU 不等待，但三步仍在同一条 stream 里排队，彼此有依赖，<b style="color:var(--ink)">并不会重叠</b>。主要收益是 CPU 腾出手做别的事。</p>
+      <p><span class="tag">cudaMemcpyAsync</span><span class="tag">必须 pinned 内存</span><span class="tag">cudaStream</span></p>
+      <p><b style="color:var(--ink)">用在</b>：CPU 侧还有别的活要干；或为 pipeline 打基础。</p>
+    </div>
+    <div class="card pipe">
+      <h3>③ 双 stream pipeline</h3>
+      <p>把数据切成小块，分到两条 stream。第 1 块在算时，第 2 块已经在传——<b style="color:var(--ink)">传输和计算重叠</b>，总时间逼近"最长那一条"而非三者相加。</p>
+      <p><span class="tag">多 stream</span><span class="tag">分块 chunk</span><span class="tag">pinned 内存</span><span class="tag">两个 Copy Engine</span></p>
+      <p><b style="color:var(--ink)">用在</b>：大数据、频繁传输、追求吞吐。深度学习数据加载、流式处理的标配。</p>
+    </div>
+  </div>
+
+  <h2>同步 / 异步各需要什么 GPU 结构</h2>
+  <table>
+    <tr><th>结构 / 机制</th><th>作用</th><th>同步</th><th>单 stream</th><th>pipeline</th></tr>
+    <tr><td>Copy Engine (DMA)</td><td>不占 SM 就能搬数据；现代 GPU 有 2 个，可同时 H2D + D2H</td><td>用 1 个</td><td>用 1 个</td><td><b style="color:var(--green)">用 2 个</b></td></tr>
+    <tr><td>Pinned 内存</td><td>锁页内存，DMA 可直接访问，异步传输的前提</td><td>可选</td><td><b style="color:var(--amber)">必须</b></td><td><b style="color:var(--amber)">必须</b></td></tr>
+    <tr><td>CUDA Stream</td><td>任务队列；同一 stream 内有序，不同 stream 可并行</td><td>默认流</td><td>1 条</td><td><b style="color:var(--green)">≥2 条</b></td></tr>
+    <tr><td>SM 计算单元</td><td>真正执行 kernel 的地方</td><td>有空档</td><td>有空档</td><td><b style="color:var(--green)">尽量填满</b></td></tr>
+    <tr><td>数据分块 (chunk)</td><td>把大任务切小，才能让各块错开重叠</td><td>不切</td><td>不切</td><td><b style="color:var(--green)">必须切</b></td></tr>
+  </table>
+
+  <div class="foot">
+    <p><b>配套代码</b>：<a href="../week2_memory/day13_pinned_memory.cu">week2_memory/day13_pinned_memory.cu</a>
+    （含同步 / 单 stream / 双 stream pipeline 三种实现与计时对比）。</p>
+    <p><b>延伸</b>：<a href="architecture_workflow.md">GPU 硬件工作流程</a> ｜ <a href="README.md">返回硬件基础</a></p>
+    <p>动画为示意：真实重叠程度取决于数据量、PCIe/NVLink 带宽、kernel 耗时与 Copy Engine 数量。想测真实数字就跑 day13。</p>
+  </div>
+</div>
+
+<script>
+// 每个任务块: {lane, start, dur, label}  lane: h2d/comp/d2h
+const MODES = {
+  sync: {
+    total: 24,
+    blocks: [
+      {lane:'h2d', s:0,  d:7, label:'H2D'},
+      {lane:'comp',s:8,  d:6, label:'计算'},
+      {lane:'d2h', s:15, d:7, label:'D2H'},
+    ],
+    steps: [
+      {t:0,  text:'<b>H2D 传入</b>：Copy Engine 把输入数据从 CPU(pinned/pageable) 搬进显存。此刻 SM 在<b>空等</b>。', struct:'用到：Copy Engine ① + PCIe/NVLink + DMA'},
+      {t:8,  text:'<b>kernel 计算</b>：数据到齐后，SM 才开始算。此刻两个 Copy Engine 都<b>闲着</b>。', struct:'用到：SM 计算单元（Copy Engine 空转）'},
+      {t:15, text:'<b>D2H 传回</b>：算完再把结果搬回 CPU。整个过程三步首尾相接，<b>总时间 = 三步相加</b>。', struct:'用到：Copy Engine ②（SM 又空转了）'},
+      {t:22, text:'<b>完成</b>。同步最慢：任何时刻只有一个部件在干活。这就是为什么要引入异步和重叠。', struct:'结论：简单但浪费——部件利用率低'},
+    ]
+  },
+  single: {
+    total: 24,
+    blocks: [
+      {lane:'h2d', s:0,  d:7, label:'H2D'},
+      {lane:'comp',s:7,  d:6, label:'计算'},
+      {lane:'d2h', s:13, d:7, label:'D2H'},
+    ],
+    steps: [
+      {t:0,  text:'<b>cudaMemcpyAsync</b> 发出后 CPU <b>不再等待</b>，立刻返回去做别的事。但传输本身仍要时间。', struct:'前提：pinned 内存 + 1 条 stream'},
+      {t:7,  text:'同一条 stream 里，三步<b>有先后依赖</b>：必须传完才能算。所以三步仍然<b>排队、不重叠</b>。', struct:'单 stream = 任务有序，无法自我重叠'},
+      {t:13, text:'<b>D2H 传回</b>。时间线和同步几乎一样——单 stream 异步<b>不会加速这一个任务</b>。', struct:'收益在 CPU 侧：腾出 CPU，不在 GPU 侧'},
+      {t:20, text:'<b>完成</b>。单 stream 异步的价值：让 CPU 去干别的、并为"多 stream 重叠"打基础。', struct:'结论：异步 ≠ 重叠，重叠需要多 stream + 分块'},
+    ]
+  },
+  pipe: {
+    total: 24,
+    blocks: [
+      // chunk A (stream0)
+      {lane:'h2d', s:0,  d:4, label:'A入'},
+      {lane:'comp',s:4,  d:4, label:'A算'},
+      {lane:'d2h', s:8,  d:4, label:'A回'},
+      // chunk B (stream1) 错开一格开始，与 A 重叠
+      {lane:'h2d', s:4,  d:4, label:'B入'},
+      {lane:'comp',s:8,  d:4, label:'B算'},
+      {lane:'d2h', s:12, d:4, label:'B回'},
+      // chunk C
+      {lane:'h2d', s:8,  d:4, label:'C入'},
+      {lane:'comp',s:12, d:4, label:'C算'},
+      {lane:'d2h', s:16, d:4, label:'C回'},
+    ],
+    steps: [
+      {t:0,  text:'把数据<b>切成小块</b> A/B/C…分到两条 stream。先传 A 的第一块。', struct:'用到：分块 chunk + 2 条 stream + pinned'},
+      {t:4,  text:'<b>关键重叠</b>：A 开始在 SM 上<b>计算</b>的同时，B 的数据已经在<b>传入</b>了——两个部件同时干活！', struct:'Copy Engine ① 传 B ‖ SM 算 A（并行）'},
+      {t:8,  text:'三条泳道<b>同时忙</b>：A 在回传、B 在计算、C 在传入。这就是 pipeline 的精髓。', struct:'D2H(A) ‖ SM(B) ‖ H2D(C) 三者并行'},
+      {t:12, text:'各块错峰流动，<b>总时间远小于</b>三步相加。部件利用率拉满。', struct:'总时间 ≈ 最长单条泳道，而非 3×'},
+      {t:18, text:'<b>完成</b>。同样的活，pipeline 用时最短。代价：代码更复杂、必须 pinned 内存、要手动分块。', struct:'结论：大数据 / 高频传输的首选'},
+    ]
+  }
+};
+
+let mode='sync', t=0, timer=null, stepIdx=0;
+const PX_PER_T = null; // 用百分比
+
+function layout(){
+  const m=MODES[mode];
+  document.getElementById('axis-end').textContent=m.total;
+  ['h2d','comp','d2h'].forEach(l=>{
+    const trk=document.getElementById('trk-'+l);
+    // 清掉旧 blk（保留 playhead）
+    [...trk.querySelectorAll('.blk')].forEach(e=>e.remove());
+  });
+  m.blocks.forEach((b,i)=>{
+    const trk=document.getElementById('trk-'+b.lane);
+    const el=document.createElement('div');
+    el.className='blk '+b.lane;
+    el.dataset.s=b.s; el.dataset.e=b.s+b.d;
+    el.style.left=(b.s/m.total*100)+'%';
+    el.style.width=(b.d/m.total*100 - 0.6)+'%';
+    el.textContent=b.label;
+    trk.appendChild(el);
+  });
+  update();
+}
+function update(){
+  const m=MODES[mode];
+  document.getElementById('clock').textContent='t = '+t;
+  const pct=(t/m.total*100)+'%';
+  ['ph1','ph2','ph3'].forEach(id=>document.getElementById(id).style.left=pct);
+  // 点亮当前时刻活跃块
+  document.querySelectorAll('.blk').forEach(el=>{
+    const s=+el.dataset.s, e=+el.dataset.e;
+    el.classList.toggle('on', t>=s && t<e);
+  });
+  // 解说
+  let cur=m.steps[0];
+  for(const st of m.steps){ if(t>=st.t) cur=st; }
+  document.getElementById('narrate').innerHTML=cur.text;
+  document.getElementById('struct').textContent='▸ '+cur.struct;
+}
+function tick(){
+  const m=MODES[mode];
+  if(t>=m.total){ stop(); return; }
+  t++; update();
+}
+function play(){
+  if(timer) return;
+  const m=MODES[mode];
+  if(t>=m.total) t=0;
+  document.getElementById('play').textContent='⏸ 暂停';
+  document.getElementById('play').onclick=stop;
+  timer=setInterval(tick, 260);
+}
+function stop(){
+  clearInterval(timer); timer=null;
+  document.getElementById('play').textContent='▶ 播放';
+  document.getElementById('play').onclick=play;
+}
+function reset(){ stop(); t=0; update(); }
+function stepFn(){ stop(); tick(); }
+
+document.getElementById('play').onclick=play;
+document.getElementById('step').onclick=stepFn;
+document.getElementById('reset').onclick=reset;
+document.querySelectorAll('.mode-tabs button').forEach(btn=>{
+  btn.onclick=()=>{
+    document.querySelectorAll('.mode-tabs button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    mode=btn.dataset.mode; reset(); layout();
+  };
+});
+layout();
+</script>
+</body>
+</html>

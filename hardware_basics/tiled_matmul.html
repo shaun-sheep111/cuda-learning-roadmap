@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分块矩阵乘法 · 动画讲解</title>
+<style>
+  :root{
+    --ink:#e8edf2; --muted:#98a7b6; --line:#31414c;
+    --panel:#101a20; --panel-2:#14242c; --bg:#071015;
+    --amber:#f4b35e; --cyan:#52d5d1; --green:#8bd49c; --red:#f07878; --purple:#b5a0f4;
+    --mono:"SFMono-Regular","Cascadia Code","Liberation Mono",monospace;
+    --sans:"Avenir Next","PingFang SC","Hiragino Sans GB",sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;color:var(--ink);
+    background:linear-gradient(rgba(82,213,209,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(82,213,209,.045) 1px,transparent 1px),var(--bg);
+    background-size:32px 32px;font-family:var(--sans);min-width:320px;}
+  .shell{max-width:1120px;margin:0 auto;padding:36px 24px 60px;}
+  .eyebrow{color:var(--amber);font:500 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;}
+  h1{font-size:clamp(28px,4.5vw,48px);line-height:1.05;margin:12px 0 14px;font-weight:500;}
+  .lede{color:var(--muted);max-width:730px;line-height:1.7;margin:0;}
+  h2{font-size:20px;font-weight:500;margin:36px 0 10px;border-left:3px solid var(--cyan);padding-left:10px;}
+  h3{font-size:15px;font-weight:600;margin:0 0 8px;}
+  .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:22px 0 10px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);}
+  button{font:500 13px var(--sans);color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;cursor:pointer;transition:.15s;}
+  button:hover{border-color:var(--cyan);color:var(--cyan);}
+  button.primary{background:var(--cyan);color:#06222a;border-color:var(--cyan);font-weight:600;}
+  .mode-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto;}
+  .mode-tabs button.active{background:var(--amber);color:#2a1c05;border-color:var(--amber);font-weight:600;}
+  .stage-label{font:500 12px var(--mono);color:var(--muted);}
+  /* 矩阵可视化 */
+  .viz{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;align-items:start;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:20px;margin-top:8px;}
+  .mat{text-align:center;}
+  .mat .cap{font:500 12px var(--mono);color:var(--muted);margin-bottom:8px;}
+  .grid-mat{display:grid;gap:2px;justify-content:center;}
+  .cell{width:var(--cs,20px);height:var(--cs,20px);background:var(--panel-2);border-radius:3px;transition:background .18s, box-shadow .18s;}
+  .cell.read{background:var(--cyan);box-shadow:0 0 8px rgba(82,213,209,.5);}
+  .cell.tile{background:rgba(244,179,94,.35);}
+  .cell.tileload{background:var(--amber);box-shadow:0 0 8px rgba(244,179,94,.6);}
+  .cell.out{background:var(--green);box-shadow:0 0 8px rgba(139,212,156,.6);}
+  .cell.acc{background:rgba(139,212,156,.3);}
+  .counters{display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;}
+  .ctr{border:1px solid var(--line);border-radius:10px;background:var(--panel-2);padding:12px 16px;min-width:150px;}
+  .ctr .k{font:500 11px var(--mono);color:var(--muted);letter-spacing:.06em;}
+  .ctr .v{font:700 24px var(--mono);margin-top:2px;}
+  .ctr.glob .v{color:var(--red);}
+  .ctr.shar .v{color:var(--green);}
+  .narrate{margin-top:14px;border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:0 10px 10px 0;background:var(--panel-2);padding:14px 16px;min-height:60px;line-height:1.6;}
+  .narrate b{color:var(--amber);}
+  /* 通用卡片/表格 */
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:14px;}
+  .card{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px;}
+  .card.naive h3{color:var(--red);} .card.tiled h3{color:var(--amber);} .card.reg h3{color:var(--green);}
+  .card p{margin:6px 0;font-size:13px;color:var(--muted);line-height:1.6;}
+  .tag{display:inline-block;font:500 11px var(--mono);padding:2px 8px;border-radius:5px;background:rgba(82,213,209,.12);color:var(--cyan);margin:3px 4px 0 0;}
+  table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px;}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;}
+  th{background:var(--panel-2);color:var(--cyan);font-weight:600;}
+  td{color:var(--muted);} td code,p code{font:400 12px var(--mono);background:rgba(255,255,255,.06);padding:1px 6px;border-radius:4px;color:var(--amber);}
+  .key{color:var(--ink);font-weight:600;}
+  .foot{margin-top:30px;color:var(--muted);font-size:12px;line-height:1.7;border-top:1px solid var(--line);padding-top:16px;}
+  a{color:var(--cyan);}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="eyebrow">hardware_basics · Day14 配套</div>
+  <h1>分块矩阵乘法</h1>
+  <p class="lede">
+    矩阵乘法 <b style="color:var(--ink)">C = A × B</b> 是 GPU 上最重要的计算模式。
+    为什么"分块(tiling)"能快几十倍？参数 <code style="color:var(--amber)">TILE_SIZE</code>、
+    <code style="color:var(--amber)">BM/BN/BK</code>、每线程算几个元素 又该怎么选？
+    这个动画用"数内存访问次数"把道理讲透。
+  </p>
+
+  <h2>板块一：为什么分块快 —— 数一数内存访问</h2>
+  <p class="lede" style="font-size:13px;margin-bottom:4px;">
+    计算 C 的一个 8×8 输出区（绿色）。看每种方法要读多少次<b style="color:var(--red)">慢的全局内存</b>、多少次<b style="color:var(--green)">快的共享内存</b>。
+  </p>
+  <div class="toolbar">
+    <button id="play" class="primary">▶ 播放</button>
+    <button id="step">单步 ▸</button>
+    <button id="reset">↺ 重置</button>
+    <span class="stage-label" id="phase">阶段 0</span>
+    <div class="mode-tabs">
+      <button data-mode="naive" class="active">① 朴素</button>
+      <button data-mode="tiled">② 基础 tiled 32×32</button>
+      <button data-mode="reg">③ 8×8 register</button>
+    </div>
+  </div>
+
+  <div class="viz">
+    <div class="mat">
+      <div class="cap">A (M×K)</div>
+      <div class="grid-mat" id="matA"></div>
+    </div>
+    <div class="mat">
+      <div class="cap">B (K×N)</div>
+      <div class="grid-mat" id="matB"></div>
+    </div>
+    <div class="mat">
+      <div class="cap">C (M×N) · 本 block 负责</div>
+      <div class="grid-mat" id="matC"></div>
+    </div>
+  </div>
+
+  <div class="counters">
+    <div class="ctr glob"><div class="k">全局内存读 (慢)</div><div class="v" id="cGlobal">0</div></div>
+    <div class="ctr shar"><div class="k">共享内存读 (快)</div><div class="v" id="cShared">0</div></div>
+    <div class="ctr"><div class="k">每线程输出元素</div><div class="v" id="cOut" style="color:var(--amber)">—</div></div>
+  </div>
+  <div class="narrate" id="narrate">选一种方法，点 <b>▶ 播放</b> 看它怎么访问内存。</div>
+
+  <h2>板块二：三个版本对比（对应 day14 的三个 kernel）</h2>
+  <div class="grid3">
+    <div class="card naive">
+      <h3>① 朴素 matMulNaive</h3>
+      <p>每个线程算 C 的 <span class="key">1 个</span>元素，为此要从全局内存读<span class="key"> A 一整行 + B 一整列</span>（各 K 次）。</p>
+      <p>相邻线程重复读同样的数据，全局内存被<b style="color:var(--red)">反复读</b>，带宽成为瓶颈。</p>
+      <p><span class="tag">block 32×32</span><span class="tag">无共享内存</span></p>
+    </div>
+    <div class="card tiled">
+      <h3>② 基础 tiled 32×32</h3>
+      <p>把 A、B 切成 <code>32×32</code> 的 tile，<span class="key">整块搬进共享内存</span>一次，block 内所有线程<b style="color:var(--amber)">复用</b>它。</p>
+      <p>全局内存读次数降到原来的 <span class="key">1/32</span>。关键靠 <code>__shared__</code> + <code>__syncthreads()</code>。</p>
+      <p><span class="tag">TILE_SIZE=32</span><span class="tag">__shared__</span><span class="tag">每线程 1 元素</span></p>
+    </div>
+    <div class="card reg">
+      <h3>③ 8×8 register tiling</h3>
+      <p>每个线程改算 <span class="key">8×8=64 个</span>输出元素，把中间结果放进<b style="color:var(--green)">寄存器</b>（最快）。</p>
+      <p>共享内存里读一次 a/b，就复用在 64 次 FMA 上 —— <span class="key">算术强度</span>大增，逼近峰值算力。</p>
+      <p><span class="tag">BM=BN=128</span><span class="tag">BK=8</span><span class="tag">每线程 64 元素</span><span class="tag">acc[8][8] 寄存器</span></p>
+    </div>
+  </div>
+
+  <h2>板块三：参数怎么设计才更快</h2>
+  <p class="lede" style="font-size:13px;">核心矛盾：<b class="key">tile 越大越能复用数据（省带宽），但占用资源越多、能同时跑的 block 越少（occupancy 降）。</b>调参就是在这两者间找平衡。</p>
+  <table>
+    <tr><th>参数</th><th>含义</th><th>调大的好处</th><th>调大的代价</th><th>day14 取值</th></tr>
+    <tr><td><code>TILE_SIZE</code></td><td>共享内存 tile 边长</td><td>全局内存读更少（复用更多）</td><td>共享内存/block 占用↑，occupancy↓</td><td><span class="key">32</span>（=warp 的整数倍，合并访问好）</td></tr>
+    <tr><td><code>BM × BN</code></td><td>每个 block 负责的 C 区域</td><td>数据复用↑，kernel 启动开销摊薄</td><td>寄存器 + 共享内存压力↑</td><td><span class="key">128×128</span></td></tr>
+    <tr><td><code>BK</code></td><td>K 方向每次处理的厚度</td><td>共享内存 tile 小、换入快</td><td>太小则同步/循环开销占比↑</td><td><span class="key">8</span></td></tr>
+    <tr><td>每线程输出</td><td>register tiling 的粒度</td><td><span class="key">算术强度↑</span>，访存/计算比改善</td><td>寄存器用量↑，用超会 spill 变慢</td><td><span class="key">8×8=64</span></td></tr>
+    <tr><td>block 线程数</td><td>一个 block 多少线程</td><td>并行度↑</td><td>须为 32 倍数，且受寄存器/共享内存限制</td><td><span class="key">16×16=256</span></td></tr>
+  </table>
+
+  <h2>一句话法则</h2>
+  <div class="narrate" style="border-left-color:var(--green)">
+    <b style="color:var(--green)">想让 GPU 算矩阵更快，就是想方设法"少读慢内存、多复用快内存"：</b>
+    全局内存 → 共享内存 → 寄存器，每往上一层快一个数量级。
+    分块把数据搬到共享内存复用；register tiling 再把复用推到寄存器层。
+    参数（TILE/BM/BN/BK/每线程元素）都是在<b class="key">复用收益</b>和<b class="key">occupancy/寄存器预算</b>之间权衡。
+    最终用 <code>profile</code>（Nsight）实测 occupancy 和 GFLOPS 来定。
+  </div>
+
+  <div class="foot">
+    <p><b>配套代码</b>：<a href="../week2_memory/day14_week2_review.cu">week2_memory/day14_week2_review.cu</a>（含朴素 / 基础 tiled / 8×8 register tiling 三个 kernel 与 GFLOPS 对比）。</p>
+    <p><b>延伸</b>：<a href="sync_async_transfer.md">同步 vs 异步传输</a> ｜ <a href="architecture_workflow.md">GPU 硬件工作流程</a> ｜ <a href="README.md">返回硬件基础</a></p>
+    <p>动画为示意：矩阵缩小为 8×8 便于观察，内存访问次数按比例体现趋势，真实数字请跑 day14。</p>
+  </div>
+</div>
+
+<script>
+const SZ=8;           // 演示矩阵边长(缩小)
+const K=8;            // K 维
+// 构建矩阵格子
+function buildMat(id){
+  const g=document.getElementById(id);
+  g.style.gridTemplateColumns=`repeat(${SZ},1fr)`;
+  g.style.setProperty('--cs','20px');
+  g.innerHTML='';
+  const cells=[];
+  for(let r=0;r<SZ;r++)for(let c=0;c<SZ;c++){
+    const d=document.createElement('div');
+    d.className='cell'; d.dataset.r=r; d.dataset.c=c;
+    g.appendChild(d); cells.push(d);
+  }
+  return cells;
+}
+let A=buildMat('matA'), B=buildMat('matB'), C=buildMat('matC');
+function cellOf(arr,r,c){return arr[r*SZ+c];}
+function clearCls(){[...A,...B,...C].forEach(d=>d.className='cell');}
+
+// 每种模式一串阶段; 每阶段: {narr, out(每线程元素数), glob增量, shar增量, draw(fn)}
+const MODES={
+  naive:{
+    out:'1',
+    phases:[
+      {narr:'<b>朴素</b>：每个线程只算 C 的 <b>1 个</b>元素。现在算 C[0][0]。',
+       g:0,s:0,draw:()=>{clearCls();cellOf(C,0,0).classList.add('out');}},
+      {narr:'要算 C[0][0]，需从<b>全局内存</b>读 A 的第 0 <b>整行</b>（K 次）。',
+       g:K,s:0,draw:()=>{for(let c=0;c<K;c++)cellOf(A,0,c).classList.add('read');cellOf(C,0,0).classList.add('out');}},
+      {narr:'再从<b>全局内存</b>读 B 的第 0 <b>整列</b>（K 次）。一个元素就要 2K 次全局读。',
+       g:K,s:0,draw:()=>{for(let r=0;r<K;r++)cellOf(B,r,0).classList.add('read');cellOf(C,0,0).classList.add('out');}},
+      {narr:'下一个线程算 C[0][1]，又要重读 A 第 0 行！<b style="color:var(--red)">同样的数据被反复读</b> → 带宽瓶颈。',
+       g:K,s:0,draw:()=>{for(let c=0;c<K;c++)cellOf(A,0,c).classList.add('read');cellOf(C,0,1).classList.add('out');cellOf(C,0,0).classList.add('acc');}},
+      {narr:'<b>结论</b>：朴素版全局内存读 ≈ 2·M·N·K，数据零复用，慢。',
+       g:0,s:0,draw:()=>{clearCls();for(let i=0;i<SZ;i++)for(let j=0;j<SZ;j++)cellOf(C,i,j).classList.add('acc');}},
+    ]
+  },
+  tiled:{
+    out:'1',
+    phases:[
+      {narr:'<b>基础 tiled</b>：把 A、B 切成 tile。先把 A 的一个 tile <b>整块搬进共享内存</b>（每格只读一次全局）。',
+       g:SZ*SZ,s:0,draw:()=>{clearCls();for(let r=0;r<SZ;r++)for(let c=0;c<SZ;c++)cellOf(A,r,c).classList.add('tileload');}},
+      {narr:'再把 B 的 tile 整块搬进共享内存。然后 <code>__syncthreads()</code> 等所有线程搬完。',
+       g:SZ*SZ,s:0,draw:()=>{clearCls();for(let r=0;r<SZ;r++)for(let c=0;c<SZ;c++){cellOf(A,r,c).classList.add('tile');cellOf(B,r,c).classList.add('tileload');}}},
+      {narr:'现在 block 内<b>所有线程</b>都从<b style="color:var(--green)">共享内存</b>读 tile 做计算 —— 同一份数据被 32 个线程<b>复用</b>！',
+       g:0,s:SZ*SZ,draw:()=>{for(let r=0;r<SZ;r++)for(let c=0;c<SZ;c++){cellOf(A,r,c).classList.add('tile');cellOf(B,r,c).classList.add('tile');cellOf(C,r,c).classList.add('out');}}},
+      {narr:'<b>结论</b>：全局内存只读了 tile 一次，复用了很多次。全局读降到朴素的约 <b>1/TILE_SIZE</b>。',
+       g:0,s:0,draw:()=>{clearCls();for(let i=0;i<SZ;i++)for(let j=0;j<SZ;j++)cellOf(C,i,j).classList.add('acc');}},
+    ]
+  },
+  reg:{
+    out:'64',
+    phases:[
+      {narr:'<b>8×8 register tiling</b>：每个线程不止算 1 个，而是算 <b>8×8=64 个</b>输出元素（绿色区）。',
+       g:0,s:0,draw:()=>{clearCls();for(let i=0;i<SZ;i++)for(let j=0;j<SZ;j++)cellOf(C,i,j).classList.add('out');}},
+      {narr:'从共享内存读一次 A 的 8 个值、B 的 8 个值到<b style="color:var(--green)">寄存器</b>（最快的存储）。',
+       g:0,s:16,draw:()=>{for(let i=0;i<SZ;i++){cellOf(A,i,0).classList.add('tileload');cellOf(B,0,i).classList.add('tileload');}for(let i=0;i<SZ;i++)for(let j=0;j<SZ;j++)cellOf(C,i,j).classList.add('acc');}},
+      {narr:'这 8+8 个值做 <b>8×8=64 次 FMA</b>，结果全累加在寄存器 <code>acc[8][8]</code> 里。<b>读一次，用 64 次</b>！',
+       g:0,s:0,draw:()=>{for(let i=0;i<SZ;i++)for(let j=0;j<SZ;j++)cellOf(C,i,j).classList.add('out');}},
+      {narr:'这就是<b style="color:var(--green)">算术强度</b>拉满：访存少、计算密，逼近 GPU 峰值算力。算完才一次性写回全局。',
+       g:SZ*SZ,s:0,draw:()=>{clearCls();for(let i=0;i<SZ;i++)for(let j=0;j<SZ;j++)cellOf(C,i,j).classList.add('tileload');}},
+      {narr:'<b>结论</b>：三层复用 全局→共享→寄存器，每层快一个数量级，GFLOPS 最高。',
+       g:0,s:0,draw:()=>{clearCls();for(let i=0;i<SZ;i++)for(let j=0;j<SZ;j++)cellOf(C,i,j).classList.add('acc');}},
+    ]
+  }
+};
+
+let mode='naive', idx=0, timer=null, gTot=0, sTot=0;
+function render(){
+  const m=MODES[mode], ph=m.phases[idx];
+  ph.draw();
+  document.getElementById('phase').textContent='阶段 '+(idx+1)+' / '+m.phases.length;
+  document.getElementById('narrate').innerHTML=ph.narr;
+  document.getElementById('cGlobal').textContent=gTot;
+  document.getElementById('cShared').textContent=sTot;
+  document.getElementById('cOut').textContent=m.out;
+}
+function next(){
+  const m=MODES[mode];
+  if(idx>=m.phases.length-1){stop();return;}
+  idx++; gTot+=m.phases[idx].g; sTot+=m.phases[idx].s; render();
+}
+function play(){
+  if(timer)return;
+  const m=MODES[mode];
+  if(idx>=m.phases.length-1)reset();
+  document.getElementById('play').textContent='⏸ 暂停';
+  document.getElementById('play').onclick=stop;
+  timer=setInterval(next,1600);
+}
+function stop(){clearInterval(timer);timer=null;
+  document.getElementById('play').textContent='▶ 播放';
+  document.getElementById('play').onclick=play;}
+function reset(){stop();idx=0;gTot=MODES[mode].phases[0].g;sTot=MODES[mode].phases[0].s;render();}
+function stepFn(){stop();next();}
+
+document.getElementById('play').onclick=play;
+document.getElementById('step').onclick=stepFn;
+document.getElementById('reset').onclick=reset;
+document.querySelectorAll('.mode-tabs button').forEach(b=>{
+  b.onclick=()=>{document.querySelectorAll('.mode-tabs button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');mode=b.dataset.mode;reset();};
+});
+reset();
+</script>
+</body>
+</html>
