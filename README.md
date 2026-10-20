@@ -1,7 +1,7 @@
-# CUDA 60 天精通路线 — 从小白到专家
+# CUDA 学习路线
 
 > 基于 NVIDIA 官方《CUDA C++ Programming Guide》(598页) 和《CUDA C++ Best Practices Guide》(118页) 系统化设计
-> 每天一个 CUDA 代码，60 天从小白到专家，掌握并行异构计算与 GPU 编程
+> 每天一个 CUDA 代码，不断熟悉，不断了解 GPU，学习并行异构计算与 GPU 编程
 
 ## 📊 在线学习路线图
 
