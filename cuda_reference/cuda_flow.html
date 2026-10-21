@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CUDA 程序调用流程 · 动画</title>
+<style>
+  :root{
+    --ink:#e8edf2; --muted:#98a7b6; --line:#31414c;
+    --panel:#101a20; --panel-2:#14242c; --bg:#071015;
+    --amber:#f4b35e; --cyan:#52d5d1; --green:#8bd49c; --red:#f07878; --purple:#b5a0f4;
+    --mono:"SFMono-Regular","Cascadia Code","Liberation Mono",monospace;
+    --sans:"Avenir Next","PingFang SC","Hiragino Sans GB",sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;color:var(--ink);
+    background:linear-gradient(rgba(82,213,209,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(82,213,209,.045) 1px,transparent 1px),var(--bg);
+    background-size:32px 32px;font-family:var(--sans);min-width:320px;}
+  .shell{max-width:1120px;margin:0 auto;padding:36px 24px 60px;}
+  .eyebrow{color:var(--amber);font:500 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;}
+  h1{font-size:clamp(26px,4.2vw,44px);line-height:1.08;margin:12px 0 14px;font-weight:500;}
+  .lede{color:var(--muted);max-width:760px;line-height:1.7;margin:0;}
+  h2{font-size:20px;font-weight:500;margin:34px 0 10px;border-left:3px solid var(--cyan);padding-left:10px;}
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:22px 0 10px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);}
+  button{font:500 13px var(--sans);color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;cursor:pointer;transition:.15s;}
+  button:hover{border-color:var(--cyan);color:var(--cyan);}
+  button.primary{background:var(--cyan);color:#06222a;border-color:var(--cyan);font-weight:600;}
+  .route{display:flex;gap:6px;margin-left:auto;}
+  .route button.active{background:var(--amber);color:#2a1c05;border-color:var(--amber);font-weight:600;}
+  .stage-label{font:500 12px var(--mono);color:var(--muted);}
+  /* 舞台：Host | PCIe | Device */
+  .stage{display:grid;grid-template-columns:1fr 70px 1fr;gap:0;border:1px solid var(--line);border-radius:12px;background:var(--panel);margin-top:8px;overflow:hidden;}
+  .side{padding:18px 16px;min-height:230px;}
+  .side.host{border-right:1px solid var(--line);}
+  .side.dev{border-left:1px solid var(--line);}
+  .side .cap{font:500 12px var(--mono);letter-spacing:.08em;margin-bottom:12px;text-transform:uppercase;}
+  .host .cap{color:var(--amber);} .dev .cap{color:var(--green);}
+  .mem{border:1px dashed var(--line);border-radius:8px;padding:10px 12px;margin:8px 0;transition:.3s;}
+  .mem .t{font:500 11px var(--mono);color:var(--muted);}
+  .mem .box{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;min-height:16px;}
+  .cellm{width:14px;height:14px;border-radius:3px;background:var(--panel-2);transition:.3s;}
+  .cellm.filled{background:var(--cyan);}
+  .cellm.result{background:var(--green);}
+  .mem.active{border-color:var(--cyan);box-shadow:0 0 12px rgba(82,213,209,.25);border-style:solid;}
+  .pcie{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--muted);font:500 10px var(--mono);}
+  .arrow{font-size:22px;color:var(--line);transition:.3s;}
+  .arrow.h2d{color:var(--cyan);text-shadow:0 0 10px var(--cyan);}
+  .arrow.d2h{color:var(--green);text-shadow:0 0 10px var(--green);}
+  .sm-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:3px;margin-top:6px;}
+  .th{width:100%;aspect-ratio:1;border-radius:2px;background:var(--panel-2);transition:.2s;}
+  .th.run{background:var(--amber);box-shadow:0 0 6px var(--amber);}
+  /* 代码 + 解说 */
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;}
+  @media(max-width:760px){.row{grid-template-columns:1fr;}}
+  pre{margin:0;border:1px solid var(--line);border-radius:10px;background:#050d11;padding:14px;overflow-x:auto;font:400 12.5px/1.5 var(--mono);color:var(--ink);white-space:pre-wrap;}
+  pre .hl{color:var(--amber);font-weight:600;}
+  .narrate{border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:0 10px 10px 0;background:var(--panel-2);padding:14px 16px;line-height:1.65;}
+  .narrate b{color:var(--amber);} .narrate .k{color:var(--ink);font-weight:600;}
+  .foot{margin-top:28px;color:var(--muted);font-size:12px;line-height:1.7;border-top:1px solid var(--line);padding-top:16px;}
+  a{color:var(--cyan);}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="eyebrow">cuda_reference</div>
+  <h1>一次 CUDA 程序的完整调用流程</h1>
+  <p class="lede">
+    7 步骨架：<b class="k" style="color:var(--ink)">分配 → 拷入 → 启动 → 同步/计时 → 拷回 → 释放</b>。
+    看数据在 Host 和 Device 之间怎么流动、每步调哪个 API。
+    手写 kernel、cuBLAS、CUTLASS 三条路线<b style="color:var(--ink)">只有"计算"那一步不同</b>，其余完全一样。
+  </p>
+
+  <div class="toolbar">
+    <button id="play" class="primary">▶ 播放</button>
+    <button id="step">单步 ▸</button>
+    <button id="reset">↺ 重置</button>
+    <span class="stage-label" id="stageLabel">第 0 / 7 步</span>
+    <div class="route">
+      <button data-r="hw" class="active">手写 kernel</button>
+      <button data-r="cublas">cuBLAS</button>
+      <button data-r="cutlass">CUTLASS</button>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="side host">
+      <div class="cap">Host (CPU 内存)</div>
+      <div class="mem" id="mHin"><div class="t">h_in / h_A</div><div class="box" id="boxHin"></div></div>
+      <div class="mem" id="mHout"><div class="t">h_out / h_C</div><div class="box" id="boxHout"></div></div>
+    </div>
+    <div class="pcie">
+      <div class="arrow" id="arrow">⇄</div>
+      <div>PCIe<br>DMA</div>
+    </div>
+    <div class="side dev">
+      <div class="cap">Device (GPU 显存 + SM)</div>
+      <div class="mem" id="mDin"><div class="t">d_in / d_A, d_B</div><div class="box" id="boxDin"></div></div>
+      <div class="mem" id="mDout"><div class="t">d_out / d_C</div><div class="box" id="boxDout"></div></div>
+      <div class="mem" id="mSM" style="border-style:solid"><div class="t">SM 线程（计算中）</div><div class="sm-grid" id="smGrid"></div></div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="narrate" id="narrate"></div>
+    <pre id="code"></pre>
+  </div>
+
+  <div class="foot">
+    <p><b>配套</b>：<a href="README.md">CUDA 范式手册</a> ｜ 模板 <a href="template_handwritten.cu">手写</a> / <a href="template_cublas.cu">cuBLAS</a> / <a href="template_cutlass.cu">CUTLASS</a></p>
+    <p>三条路线的"计算"步只是换了函数（kernel&lt;&lt;&lt;&gt;&gt;&gt; / cublasSgemm / gemm_op(args)），内存与计时流程完全通用。</p>
+  </div>
+</div>
+
+<script>
+// 计算步代码片段随路线变
+const COMPUTE={
+  hw:{code:'scanKernel<<<grid, block>>>(d_in, d_out, n);\ncudaGetLastError();        // 查启动',
+      narr:'<b>③ 启动核函数</b>：<code>kernel&lt;&lt;&lt;grid,block&gt;&gt;&gt;</code> 让 GPU 的大量线程<b>并行</b>执行。这是你<span class="k">手写的 __global__ 函数</span>。'},
+  cublas:{code:'cublasSgemm(handle, N, N, M,N,K,\n    &alpha, dA,M, dB,K, &beta, dC,M);',
+      narr:'<b>③ 调 cuBLAS</b>：不写 kernel，直接调<code>cublasSgemm</code>。官方已优化好，<span class="k">注意列主序</span>。'},
+  cutlass:{code:'Gemm gemm_op;\ngemm_op(args);   // device-level API',
+      narr:'<b>③ 调 CUTLASS</b>：用模板组装的 <code>Gemm</code> 类型执行。<span class="k">可定制、可融合</span>，性能逼近 cuBLAS。'},
+};
+
+const STEPS=[
+  {label:'准备输入', arrow:'⇄', hin:1, hout:0, din:0, dout:0, sm:0,
+   code:'float *h_in = malloc(bytes);\nfor(...) h_in[i] = ...;   // 填数据',
+   narr:'<b>准备</b>：在 <span class="k">Host(CPU)</span> 内存里准备输入数据 h_in。此刻 GPU 一无所有。'},
+  {label:'① cudaMalloc', arrow:'⇄', hin:1, hout:0, din:0.3, dout:0.3, sm:0,
+   code:'cudaMalloc(&d_in,  bytes);\ncudaMalloc(&d_out, bytes);',
+   narr:'<b>① 分配显存</b>：<code>cudaMalloc</code> 在 <span class="k">Device(GPU)</span> 开辟 d_in/d_out（暂时是空的）。'},
+  {label:'② cudaMemcpy H2D', arrow:'h2d', hin:1, hout:0, din:1, dout:0, sm:0,
+   code:'cudaMemcpy(d_in, h_in, bytes,\n           cudaMemcpyHostToDevice);',
+   narr:'<b>② 拷入 H2D</b>：数据经 <span class="k">PCIe/DMA</span> 从 Host → Device。看箭头：d_in 被填满。'},
+  {label:'③ 计算', arrow:'⇄', hin:1, hout:0, din:1, dout:0, sm:1,
+   code:'',  // 由 COMPUTE 注入
+   narr:''},
+  {label:'④ 同步/计时', arrow:'⇄', hin:1, hout:0, din:1, dout:1, sm:0,
+   code:'cudaEventRecord(stop);\ncudaEventSynchronize(stop);\ncudaEventElapsedTime(&ms, start, stop);',
+   narr:'<b>④ 同步与计时</b>：kernel 异步执行，用 <code>cudaEventSynchronize</code> 等它算完，<code>cudaEventElapsedTime</code> 得到 GPU 真实耗时。d_out 已算出结果。'},
+  {label:'⑤ cudaMemcpy D2H', arrow:'d2h', hin:1, hout:1, din:1, dout:1, sm:0,
+   code:'cudaMemcpy(h_out, d_out, bytes,\n           cudaMemcpyDeviceToHost);',
+   narr:'<b>⑤ 拷回 D2H</b>：结果经 PCIe 从 Device → Host。看箭头：h_out 被结果填满，CPU 拿到答案。'},
+  {label:'⑥⑦ 释放+检查', arrow:'⇄', hin:1, hout:1, din:0, dout:0, sm:0,
+   code:'cudaFree(d_in); cudaFree(d_out);\ncudaEventDestroy(start/stop);\ncudaGetLastError(); // 全程错误检查',
+   narr:'<b>⑥⑦ 清理</b>：<code>cudaFree</code> 释放显存、<code>cudaEventDestroy</code> 销毁事件。全程用 <code>cudaGetLastError</code> 检查。流程结束。'},
+];
+
+let route='hw', idx=0, timer=null;
+// 初始化内存格子
+function fillBox(id,n,cls){const b=document.getElementById(id);b.innerHTML='';for(let i=0;i<8;i++){const d=document.createElement('div');d.className='cellm'+(i<n*8?(' '+cls):'');b.appendChild(d);}}
+function initSM(){const g=document.getElementById('smGrid');g.innerHTML='';for(let i=0;i<32;i++){const d=document.createElement('div');d.className='th';g.appendChild(d);}}
+initSM();
+
+function render(){
+  const s=STEPS[idx];
+  document.getElementById('stageLabel').textContent='第 '+idx+' / 7 步 · '+s.label;
+  fillBox('boxHin', s.hin,'filled');
+  fillBox('boxHout',s.hout,'result');
+  fillBox('boxDin', s.din,'filled');
+  fillBox('boxDout',s.dout,'result');
+  // 箭头
+  const a=document.getElementById('arrow');a.className='arrow'+(s.arrow==='h2d'?' h2d':s.arrow==='d2h'?' d2h':'');
+  a.textContent=s.arrow==='h2d'?'⇒':s.arrow==='d2h'?'⇐':'⇄';
+  // SM 线程点亮
+  const run=s.sm>0;
+  document.querySelectorAll('.th').forEach((t,i)=>t.classList.toggle('run',run));
+  document.getElementById('mSM').classList.toggle('active',run);
+  // 高亮活跃内存
+  document.getElementById('mDin').classList.toggle('active', s.arrow==='h2d');
+  document.getElementById('mHout').classList.toggle('active', s.arrow==='d2h');
+  // 代码 + 解说（计算步注入路线专属）
+  let code=s.code, narr=s.narr;
+  if(idx===3){code=COMPUTE[route].code; narr=COMPUTE[route].narr;}
+  document.getElementById('code').innerHTML=code.replace(/(cuda\w+|cublas\w+|gemm_op|kernel|__global__)/g,'<span class="hl">$1</span>');
+  document.getElementById('narrate').innerHTML=narr;
+}
+function next(){ if(idx>=STEPS.length-1){stop();return;} idx++; render(); }
+function play(){ if(timer)return; if(idx>=STEPS.length-1)idx=0;
+  document.getElementById('play').textContent='⏸ 暂停'; document.getElementById('play').onclick=stop;
+  timer=setInterval(next,1800); }
+function stop(){ clearInterval(timer);timer=null;
+  document.getElementById('play').textContent='▶ 播放'; document.getElementById('play').onclick=play; }
+function reset(){ stop(); idx=0; render(); }
+
+document.getElementById('play').onclick=play;
+document.getElementById('step').onclick=()=>{stop();next();};
+document.getElementById('reset').onclick=reset;
+document.querySelectorAll('.route button').forEach(b=>{
+  b.onclick=()=>{document.querySelectorAll('.route button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); route=b.dataset.r; render();};
+});
+render();
+</script>
+</body>
+</html>

@@ -126,6 +126,7 @@ CUDA 代码只是 GPU 编程接口。学习路线还需要回答两个更底层�
 | 第 1 章图解 | 硬件工作流程、Mermaid 结构图、CPU-GPU 时序图 | [`hardware_basics/architecture_workflow.md`](hardware_basics/architecture_workflow.md) |
 | 第 1 章动画 | 用单步或播放观察一次向量加法的硬件路径 | [`hardware_basics/gpu_workflow_animation.html`](hardware_basics/gpu_workflow_animation.html) |
 | 第 1 章地址动画 | 3D 展示线程索引、字节地址、缓存和显存链路 | [`hardware_basics/memory_address_3d.html`](hardware_basics/memory_address_3d.html) |
+| 编程范式速查 | CUDA API 与调用流程：核函数、内存、同步、计时，手写/cuBLAS/CUTLASS 三条路线 | [`cuda_reference/README.md`](cuda_reference/README.md) |
 | 第 2 章 | CUDA 基础：kernel、线程层级、内存、错误处理和计时 | [`week1_basics/`](week1_basics/) |
 | 第 3 章 | 内存模型：shared、constant、texture、coalescing、pinned memory | [`week2_memory/`](week2_memory/) |
 | 第 4 章 | 并行模式：reduce、scan、tiling、histogram、sort | [`week3_patterns/`](week3_patterns/) |
