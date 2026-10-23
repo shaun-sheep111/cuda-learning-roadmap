@@ -209,28 +209,14 @@ CUDA 代码只是 GPU 编程接口。学习路线还需要回答两个更底层�
 
 这套基础也适用于 AI Infra：FlashAttention 的 tile、online softmax 和数据复用，vLLM 的 continuous batching、PagedAttention 和 KV cache 分页，都是“重新组织工作、数据和通信”的并行设计问题。CUDA 是底层实现工具，先理解并行结构，才能读懂这些系统的设计取舍。
 
-## 章节目录
+## 学习路线
 
-本仓库按“思维方式 → 硬件结构 → CUDA 编程 → 性能与系统”的顺序组织。先修章节不是 CUDA API 参考，而是后续代码能否读懂、能否设计出高效实现的基础。
+先修：[并行计算思维](parallel_thinking/) · [GPU 硬件基础](hardware_basics/) · [编程范式速查](cuda_reference/)
 
-| 章节 | 内容 | 入口 |
-|---|---|---|
-| 第 0 章 | 并行计算思维：任务拆分、依赖、通信、同步、性能模型、AI Infra 设计 | [`parallel_thinking/README.md`](parallel_thinking/README.md) |
-| 第 1 章 | GPU 硬件基础：GPU 总体结构、Grid/Block/Warp/SM、计算管线、内存和 DMA | [`hardware_basics/README.md`](hardware_basics/README.md) |
-| 第 1 章图解 | 硬件工作流程、Mermaid 结构图、CPU-GPU 时序图 | [`hardware_basics/architecture_workflow.md`](hardware_basics/architecture_workflow.md) |
-| 第 1 章动画 | 用单步或播放观察一次向量加法的硬件路径 | [`hardware_basics/gpu_workflow_animation.html`](hardware_basics/gpu_workflow_animation.html) |
-| 第 1 章地址动画 | 3D 展示线程索引、字节地址、缓存和显存链路 | [`hardware_basics/memory_address_3d.html`](hardware_basics/memory_address_3d.html) |
-| 编程范式速查 | CUDA API 与调用流程：核函数、内存、同步、计时，手写/cuBLAS/CUTLASS 三条路线 | [`cuda_reference/README.md`](cuda_reference/README.md) |
-| 第 2 章 | CUDA 基础：kernel、线程层级、内存、错误处理和计时 | [`week1_basics/`](week1_basics/) |
-| 第 3 章 | 内存模型：shared、constant、texture、coalescing、pinned memory | [`week2_memory/`](week2_memory/) |
-| 第 4 章 | 并行模式：reduce、scan、tiling、histogram、sort | [`week3_patterns/`](week3_patterns/) |
-| 第 5 章 | 高级执行：warp、streams、multi-GPU、CUDA libraries | [`week4_advanced/`](week4_advanced/) |
-| 第 6 章 | 性能优化：APOD、occupancy、指令、控制流和数值精度 | [`week6_optimization/`](week6_optimization/) |
-| 第 7 章 | 专家主题：Tensor Core、异步拷贝、CUDA Graph、Unified Memory | [`week7_expert/`](week7_expert/) |
-| 第 8 章 | CUDA 生态：缓存、分配器、虚拟内存、编译、调试和部署 | [`week8_ecosystem/`](week8_ecosystem/) |
-| 第 9 章 | 综合实战：卷积、N-Body、稀疏计算、推理式管线 | [`week9_mastery/`](week9_mastery/) |
+阅读顺序：先修 → Week1-2 基础 → Week3-5 模式/实战 → Week6-9 优化/专家。
+学 AI Infra 可从 `parallel_thinking/` 的 FlashAttention / vLLM 小节入手，再回到 Week3/4/7 找对应 kernel 与内存技术。
 
-推荐阅读路径：`第 0 章 → 第 1 章 → 第 2 章 → 第 3-5 章 → 第 6-9 章`。学习 AI Infra 时，可从第 0 章的 FlashAttention 和 vLLM 小节开始，再回到第 3、4、7 章寻找对应的 kernel 和内存技术。
+具体每周内容见下方总览表：
 
 ## 路线总览
 
@@ -373,6 +359,11 @@ CUDA 代码只是 GPU 编程接口。学习路线还需要回答两个更底层�
 
 ## 官方指南章节对照速查
 
+本路线按 NVIDIA 官方指南设计：[Programming Guide (PG)](https://docs.nvidia.com/cuda/cuda-c-programming-guide/) 与 [Best Practices Guide (BPG)](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)。每日代码对应的具体章节也见各 `.cu` 文件头注释。
+
+<details>
+<summary>展开查看 PG / BPG 章节 → 天数 完整对照表</summary>
+
 ### Programming Guide (PG) 核心章节
 
 | 章节 | 标题 | 对应天数 |
@@ -420,6 +411,8 @@ CUDA 代码只是 GPU 编程接口。学习路线还需要回答两个更底层�
 | Ch 13 | Control Flow (Divergence, Predication) | Day 35 |
 | Ch 14-18 | Deploying CUDA Applications | Day 51 |
 | Ch 20 | nvcc Compiler Switches | Day 48 |
+
+</details>
 
 ---
 
