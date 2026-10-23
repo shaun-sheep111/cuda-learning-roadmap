@@ -20,6 +20,7 @@
 - [同步 vs 异步传输](sync_async_transfer.md)：讲清同步 / 单 stream 异步 / 双 stream pipeline 三种传输方式、各需哪些 GPU 结构、什么场景用哪种（Day 13 配套）。配套[动画（在线查看）](https://shaun-sheep111.github.io/cuda-learning-roadmap/hardware_basics/sync_async_transfer.html)可播放/单步看传输与计算如何重叠。
 - [分块矩阵乘法](tiled_matmul.md)：讲清分块(tiling)为什么快、朴素/基础tiled/8×8 register 三版本对比、以及 TILE_SIZE/BM/BN/BK/每线程元素等参数如何设计（Day 14 配套）。配套[动画（在线查看）](https://shaun-sheep111.github.io/cuda-learning-roadmap/hardware_basics/tiled_matmul.html)用"数内存访问次数"看清复用带来的加速。
 - [SGEMM 优化链（进阶）](sgemm_optimize.md)：从 tiled 继续推进到接近 cuBLAS —— BM×BN/TM×TN 两层分块、float4 向量化、双缓冲、消除 bank conflict，含 RTX 4090 的寄存器/共享内存/occupancy 定量分析。配套[动画（在线查看）](https://shaun-sheep111.github.io/cuda-learning-roadmap/hardware_basics/sgemm_optimize.html)逐步点看每步加速与代价。
+- [Blelloch Scan（前缀和）](https://shaun-sheep111.github.io/cuda-learning-roadmap/hardware_basics/blelloch_scan.html)：工作高效前缀和动画（Day 19 流压缩配套）。逐层演示 up-sweep/down-sweep，看清 `index=(tid+1)*stride*2-1` 如何把连续线程映射到树节点、以及为什么要跳步。
 
 推荐顺序：先读并行计算思维，再读硬件工作流程，最后运行本目录的查询和带宽实验。
 

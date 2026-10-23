@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blelloch Scan · 动画讲解</title>
+<style>
+  :root{
+    --ink:#e8edf2; --muted:#98a7b6; --line:#31414c;
+    --panel:#101a20; --panel-2:#14242c; --bg:#071015;
+    --amber:#f4b35e; --cyan:#52d5d1; --green:#8bd49c; --red:#f07878; --purple:#b5a0f4;
+    --mono:"SFMono-Regular","Cascadia Code","Liberation Mono",monospace;
+    --sans:"Avenir Next","PingFang SC","Hiragino Sans GB",sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;color:var(--ink);
+    background:linear-gradient(rgba(82,213,209,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(82,213,209,.045) 1px,transparent 1px),var(--bg);
+    background-size:32px 32px;font-family:var(--sans);min-width:320px;}
+  .shell{max-width:1060px;margin:0 auto;padding:36px 24px 60px;}
+  .eyebrow{color:var(--amber);font:500 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;}
+  h1{font-size:clamp(26px,4.2vw,44px);line-height:1.08;margin:12px 0 14px;font-weight:500;}
+  .lede{color:var(--muted);max-width:760px;line-height:1.7;margin:0;}
+  h2{font-size:20px;font-weight:500;margin:34px 0 10px;border-left:3px solid var(--cyan);padding-left:10px;}
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:22px 0 10px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);}
+  button{font:500 13px var(--sans);color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;cursor:pointer;transition:.15s;}
+  button:hover{border-color:var(--cyan);color:var(--cyan);}
+  button.primary{background:var(--cyan);color:#06222a;border-color:var(--cyan);font-weight:600;}
+  .phase-tabs{display:flex;gap:8px;margin-left:auto;}
+  .phase-tabs button.active{background:var(--amber);color:#2a1c05;border-color:var(--amber);font-weight:600;}
+  .stage-label{font:500 12px var(--mono);color:var(--muted);}
+  /* 线程行 */
+  .board{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:20px;margin-top:8px;overflow-x:auto;}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font:400 11px var(--mono);color:var(--muted);margin-bottom:14px;}
+  .lg{display:inline-flex;align-items:center;gap:5px;} .sw{width:12px;height:12px;border-radius:3px;display:inline-block;}
+  .idxrow,.cells,.tidrow{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;min-width:560px;}
+  .idxrow div,.tidrow div{text-align:center;font:500 11px var(--mono);color:var(--muted);}
+  .cells{margin:6px 0;}
+  .cell{height:52px;border-radius:8px;background:var(--panel-2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font:600 16px var(--mono);transition:.3s;position:relative;}
+  .cell.active{border-color:var(--amber);box-shadow:0 0 14px rgba(244,179,94,.45);background:rgba(244,179,94,.12);}
+  .cell.src{border-color:var(--cyan);color:var(--cyan);}
+  .cell.changed{background:rgba(139,212,156,.2);border-color:var(--green);color:var(--green);}
+  .cell.root{border-color:var(--purple);color:var(--purple);}
+  .tidrow div.work{color:var(--amber);font-weight:700;}
+  .tidrow div.idle{opacity:.3;}
+  /* 箭头层(表示 index-stride → index) */
+  .arrows{position:relative;height:0;}
+  .narrate{margin-top:16px;border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:0 10px 10px 0;background:var(--panel-2);padding:14px 16px;line-height:1.65;min-height:72px;}
+  .narrate b{color:var(--amber);} .narrate .k{color:var(--ink);font-weight:600;} .narrate code{font:400 12px var(--mono);background:rgba(255,255,255,.06);padding:1px 6px;border-radius:4px;color:var(--cyan);}
+  .mapbox{margin-top:12px;border:1px solid var(--line);border-radius:10px;background:#050d11;padding:14px;font:400 12.5px/1.7 var(--mono);color:var(--ink);overflow-x:auto;}
+  .mapbox .hl{color:var(--amber);} .mapbox .dim{color:var(--muted);}
+  .note{margin-top:18px;border:1px solid var(--line);border-left:3px solid var(--green);border-radius:0 10px 10px 0;background:var(--panel-2);padding:14px 16px;line-height:1.7;font-size:13px;}
+  .note b{color:var(--green);} .note .k{color:var(--ink);font-weight:600;} .note code{font:400 12px var(--mono);background:rgba(255,255,255,.06);padding:1px 6px;border-radius:4px;color:var(--cyan);}
+  .foot{margin-top:28px;color:var(--muted);font-size:12px;line-height:1.7;border-top:1px solid var(--line);padding-top:16px;}
+  a{color:var(--cyan);}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="eyebrow">hardware_basics · Day19 配套</div>
+  <h1>Blelloch Scan（工作高效前缀和）</h1>
+  <p class="lede">
+    day19 流压缩里的 scan 用的就是 Blelloch 算法。它把数组看成一棵<b class="k" style="color:var(--ink)">二叉树</b>，
+    分 <b style="color:var(--ink)">up-sweep（求和往上）</b>和 <b style="color:var(--ink)">down-sweep（撒前缀和往下）</b>两趟。
+    看清 <code style="color:var(--amber)">index=(tid+1)*stride*2-1</code> 怎么把<b class="k" style="color:var(--ink)">连续线程</b>映射到<b class="k" style="color:var(--ink)">树节点</b>，以及为什么要<b class="k" style="color:var(--ink)">跳步</b>。
+  </p>
+
+  <div class="toolbar">
+    <button id="play" class="primary">▶ 播放</button>
+    <button id="step">单步 ▸</button>
+    <button id="reset">↺ 重置</button>
+    <span class="stage-label" id="stageLabel"></span>
+    <div class="phase-tabs">
+      <button data-p="up" class="active">↑ Up-sweep</button>
+      <button data-p="down">↓ Down-sweep</button>
+    </div>
+  </div>
+
+  <div class="board">
+    <div class="legend">
+      <span class="lg"><span class="sw" style="background:rgba(244,179,94,.4);border:1px solid var(--amber)"></span>本步写入(index)</span>
+      <span class="lg"><span class="sw" style="background:var(--panel-2);border:1px solid var(--cyan)"></span>被读取(index-stride)</span>
+      <span class="lg"><span class="sw" style="background:rgba(139,212,156,.3);border:1px solid var(--green)"></span>刚变化</span>
+      <span class="lg"><span class="sw" style="background:var(--panel-2);border:1px solid var(--purple)"></span>树根</span>
+    </div>
+    <div class="idxrow" id="idxrow"></div>
+    <div class="cells" id="cells"></div>
+    <div class="tidrow" id="tidrow"></div>
+    <div style="text-align:center;font:400 11px var(--mono);color:var(--muted);margin-top:4px">↑ 哪些 tid 在本步干活（橙色=活跃，灰=空转）</div>
+  </div>
+
+  <div class="mapbox" id="mapbox"></div>
+  <div class="narrate" id="narrate"></div>
+
+  <div class="note">
+    <b>两个关键点</b><br>
+    ① <b class="k">线程≠固定数据</b>：8 个线程全程在，但每层用 <code>index=(tid+1)*stride*2-1</code> 让 <span class="k">连续的 tid 0,1,2…</span> 认领本层要合并的节点；<code>if(index&lt;BLOCK_SIZE)</code> 自动筛掉多余线程 → 活跃数 4→2→1，正好是树每层的节点数。<br>
+    ② <b class="k">为什么跳步</b>：跳步精确命中二叉树<span class="k">该层的节点</span>，每个部分和只算一次，总加法 O(n)（工作高效）；若相邻叠加会重复计算、既慢又错。
+  </div>
+
+  <h2>对应 day19 的代码</h2>
+  <div class="mapbox"><span class="dim">// Up-sweep（求和树）</span>
+for (int <span class="hl">stride</span> = 1; stride &lt; BLOCK_SIZE; stride &lt;&lt;= 1) {
+    int <span class="hl">index</span> = (tid + 1) * stride * 2 - 1;
+    if (index &lt; BLOCK_SIZE) sdata[index] += sdata[index - stride];
+    __syncthreads();
+}
+<span class="dim">// 根清零（exclusive 关键）</span>
+if (tid==0){ blockSums[bid]=sdata[N-1]; sdata[N-1]=0; }
+<span class="dim">// Down-sweep（撒前缀和）</span>
+for (int <span class="hl">stride</span> = BLOCK_SIZE/2; stride &gt; 0; stride &gt;&gt;= 1) {
+    int <span class="hl">index</span> = (tid + 1) * stride * 2 - 1;
+    if (index &lt; BLOCK_SIZE) {
+        int tmp=sdata[index-stride]; sdata[index-stride]=sdata[index]; sdata[index]+=tmp;
+    }
+    __syncthreads();
+}</div>
+
+  <div class="foot">
+    <p><b>配套代码</b>：<a href="../week3_patterns/day19_compact.cu">week3_patterns/day19_compact.cu</a>（流压缩 predicate→scan→scatter）。</p>
+    <p><b>延伸</b>：<a href="tiled_matmul.md">分块矩阵乘法</a> ｜ <a href="sgemm_optimize.md">SGEMM 优化链</a> ｜ <a href="README.md">返回硬件基础</a></p>
+  </div>
+</div>
+
+<script>
+const N=8;
+// 生成每一趟的分步序列。每步记录: stride, 活跃 tid→index 映射, 操作后数组快照, 解说
+function buildUp(){
+  let arr=[3,1,2,0,4,1,1,2];           // 初始(day19 的 predicate 风格 0/1/小数)
+  const init=arr.slice();
+  const steps=[{stride:0,arr:init.slice(),acts:[],root:-1,
+    narr:'<b>初始</b>：sdata = ['+init.join(', ')+']。目标：up-sweep 把区间和不断往"右节点"聚合，最终 sdata[7]=总和。'}];
+  for(let stride=1; stride<N; stride<<=1){
+    const acts=[];
+    for(let tid=0; tid<N; tid++){
+      const index=(tid+1)*stride*2-1;
+      if(index<N){ acts.push({tid,index,src:index-stride}); }
+    }
+    acts.forEach(a=>{ arr[a.index]+=arr[a.src]; });
+    const workTids=acts.map(a=>a.tid);
+    const pairs=acts.map(a=>`tid${a.tid}:sdata[${a.index}]+=sdata[${a.src}]`).join('　');
+    steps.push({stride,arr:arr.slice(),acts:acts.slice(),root:(stride*2>=N?N-1:-1),
+      narr:`<b>stride=${stride}</b>：公式 <code>index=(tid+1)*${stride}*2-1</code>。活跃线程 <b>tid ${workTids.join(',')}</b>（共 ${workTids.length} 个），各自把左邻区间和并入右节点。其余 tid 被 <code>if(index&lt;8)</code> 挡掉。`});
+  }
+  // 标记根
+  steps[steps.length-1].narr+=' 此时 <b>sdata[7] = 全部之和</b>（树根）。';
+  return {steps, upFinal:arr.slice()};
+}
+function buildDown(upFinal){
+  // down-sweep 从 up 的结果开始，先根清零
+  let arr=upFinal.slice();
+  const total=arr[N-1];
+  arr[N-1]=0;
+  const steps=[{stride:0,arr:arr.slice(),acts:[],root:N-1,
+    narr:`<b>根清零</b>：先保存总和(${total})，再把 <code>sdata[7]=0</code>。这是 <b>exclusive</b> scan 的关键——根放 0，往下撒时每个位置得到的是"它左边所有元素的和"。`}];
+  for(let stride=N/2; stride>0; stride>>=1){
+    const acts=[];
+    for(let tid=0; tid<N; tid++){
+      const index=(tid+1)*stride*2-1;
+      if(index<N){ acts.push({tid,index,src:index-stride}); }
+    }
+    // 交换 + 累加
+    acts.forEach(a=>{ const tmp=arr[a.src]; arr[a.src]=arr[a.index]; arr[a.index]+=tmp; });
+    const workTids=acts.map(a=>a.tid);
+    steps.push({stride,arr:arr.slice(),acts:acts.slice(),root:-1,
+      narr:`<b>stride=${stride}</b>：活跃 <b>tid ${workTids.join(',')}</b>。每对做"交换+累加"：左孩子拿父节点的值，右节点=原左孩子+父节点。前缀和逐层<b>撒下去</b>。`});
+  }
+  steps[steps.length-1].narr+=' 结束后 sdata = 每个位置的 <b>exclusive 前缀和</b>，正是 day19 里每个元素的输出位置。';
+  return steps;
+}
+
+const UP=buildUp();
+const upSteps=UP.steps;
+const downSteps=buildDown(UP.upFinal);
+
+let phase='up', idx=0, timer=null;
+function cur(){ return (phase==='up'?upSteps:downSteps); }
+
+function render(){
+  const steps=cur(), s=steps[idx];
+  document.getElementById('stageLabel').textContent=(phase==='up'?'Up-sweep':'Down-sweep')+' · 步 '+idx+'/'+(steps.length-1);
+  // 下标行
+  const ir=document.getElementById('idxrow'); ir.innerHTML='';
+  for(let i=0;i<N;i++){const d=document.createElement('div');d.textContent='['+i+']';ir.appendChild(d);}
+  // 格子
+  const cs=document.getElementById('cells'); cs.innerHTML='';
+  const writeSet=new Set(s.acts.map(a=>a.index));
+  const srcSet=new Set(s.acts.map(a=>a.src));
+  for(let i=0;i<N;i++){
+    const d=document.createElement('div'); d.className='cell'; d.textContent=s.arr[i];
+    if(writeSet.has(i)) d.classList.add('active','changed');
+    if(srcSet.has(i)) d.classList.add('src');
+    if(s.root===i) d.classList.add('root');
+    cs.appendChild(d);
+  }
+  // tid 行
+  const tr=document.getElementById('tidrow'); tr.innerHTML='';
+  const workTids=new Set(s.acts.map(a=>a.tid));
+  for(let t=0;t<N;t++){const d=document.createElement('div');d.textContent='t'+t;d.className=workTids.has(t)?'work':'idle';tr.appendChild(d);}
+  // 映射盒
+  const mb=document.getElementById('mapbox');
+  if(s.acts.length){
+    mb.innerHTML=s.acts.map(a=>`<span class="hl">tid${a.tid}</span> → index=(${a.tid}+1)*${s.stride}*2-1 = <span class="hl">${a.index}</span>　<span class="dim">读 sdata[${a.src}]</span>`).join('<br>');
+  } else { mb.innerHTML='<span class="dim">（本步无合并操作）</span>'; }
+  document.getElementById('narrate').innerHTML=s.narr;
+}
+function next(){ const steps=cur(); if(idx>=steps.length-1){stop();return;} idx++; render(); }
+function play(){ if(timer)return; const steps=cur(); if(idx>=steps.length-1)idx=0;
+  document.getElementById('play').textContent='⏸ 暂停'; document.getElementById('play').onclick=stop;
+  timer=setInterval(next,1700); }
+function stop(){ clearInterval(timer);timer=null;
+  document.getElementById('play').textContent='▶ 播放'; document.getElementById('play').onclick=play; }
+function reset(){ stop(); idx=0; render(); }
+
+document.getElementById('play').onclick=play;
+document.getElementById('step').onclick=()=>{stop();next();};
+document.getElementById('reset').onclick=reset;
+document.querySelectorAll('.phase-tabs button').forEach(b=>{
+  b.onclick=()=>{document.querySelectorAll('.phase-tabs button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); phase=b.dataset.p; reset();};
+});
+render();
+</script>
+</body>
+</html>
