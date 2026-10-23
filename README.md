@@ -104,6 +104,100 @@ H2D/D2H 是 CPU 与 GPU 的通信，L2/显存是 GPU 内的数据路径，寄存
 
 核心判断顺序是：**工作如何切分 → 数据在哪里 → 需要多少通信 → 同步范围多大 → 瓶颈是计算还是带宽**。这也是 FlashAttention、vLLM 和 CUDA kernel 共同使用的并行设计方法。
 
+## GPU 硬件要点速览
+
+> 详细讲解见 [`hardware_basics/`](hardware_basics/)。这里是首页自包含的核心要点。
+
+**GPU vs CPU 的设计哲学**
+
+| | CPU | GPU |
+|---|---|---|
+| 核心数 | 少（几个~几十） | 极多（数千 CUDA core） |
+| 单核 | 强，低延迟，大缓存 | 弱，高吞吐 |
+| 擅长 | 复杂逻辑、串行、分支 | 大规模数据并行 |
+
+一句话：**CPU 优化延迟，GPU 优化吞吐**。GPU 靠"海量线程 + 快速切换"隐藏内存延迟。
+
+**硬件层次**：`GPU → 多个 SM → (CUDA Core + Tensor Core + 寄存器 + 共享内存/L1) → Warp(32线程) → Thread`
+对应软件模型：`Grid → Block(落到一个 SM) → Warp → Thread`。
+
+**Warp（最重要的概念）**：GPU 以 **32 个线程为一组(warp)** 执行同一条指令（SIMT）。由此两大性能点：
+- **线程束分化**：warp 内走不同 if 分支 → 串行各分支 → 变慢。所以 block size 常取 32 的倍数。
+- **合并访问**：warp 内 32 线程访问连续内存 → 合并为一次事务 → 快；访问分散则慢。
+
+**内存层次（快→慢 / 小→大）**
+
+| 内存 | 速度 | 作用域 | 关键点 |
+|---|---|---|---|
+| 寄存器 | 最快 | 单线程 | 用超会 spill |
+| 共享内存 | 很快 | Block 内 | 手动管理，注意 bank conflict |
+| L1/L2 | 快 | SM/全局 | 硬件自动 |
+| 全局内存(显存) | 慢(相对) | 所有线程 | 要合并访问 |
+
+> 优化本质：**尽量把数据放在快的内存里、减少访问慢内存的次数**（分块 tiling、register tiling 的意义）。
+
+## CUDA 基础语法速览
+
+> 完整范式与可编译模板见 [`cuda_reference/`](cuda_reference/)。这里是首页自包含的最小速查。
+
+**一次 CUDA 程序的 7 步骨架**
+
+```
+① cudaMalloc            分配显存
+② cudaMemcpy H2D        拷入数据
+③ kernel<<<grid,block>>>  启动核函数
+④ cudaDeviceSynchronize / cudaEvent*   同步与计时
+⑤ cudaMemcpy D2H        拷回结果
+⑥ cudaFree              释放显存
+⑦ cudaGetLastError      错误检查
+```
+
+**核函数与内置变量**
+
+```cpp
+__global__ void addKernel(const float *a, const float *b, float *c, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;  // 当前线程负责第几个数据
+    if (idx < n) c[idx] = a[idx] + b[idx];            // 边界检查
+}
+// 启动：block 取 32 的倍数，grid 向上取整
+int block = 256, grid = (n + block - 1) / block;
+addKernel<<<grid, block>>>(d_a, d_b, d_c, n);
+```
+
+| 限定符 | 执行位置 | 说明 |
+|---|---|---|
+| `__global__` | GPU | 核函数，`<<<>>>` 启动，返回 void |
+| `__device__` | GPU | GPU 内部辅助函数 |
+| `__shared__` | GPU | block 内共享的高速内存 |
+
+内置变量：`threadIdx` / `blockIdx` / `blockDim` / `gridDim`。
+同步：`__syncthreads()`（block 内屏障，共享内存读写之间用）。
+
+**常用运行时 API**
+
+| 类别 | 函数 |
+|---|---|
+| 内存 | `cudaMalloc` / `cudaMemcpy` / `cudaFree` / `cudaMallocHost`(pinned) |
+| 拷贝方向 | `cudaMemcpyHostToDevice` / `DeviceToHost` / `DeviceToDevice` |
+| 同步 | `cudaDeviceSynchronize` / `cudaStreamSynchronize` / `__syncthreads` |
+| 计时 | `cudaEventCreate` → `cudaEventRecord` → `cudaEventSynchronize` → `cudaEventElapsedTime` → `cudaEventDestroy` |
+| 错误 | `cudaGetLastError` / `cudaGetErrorString` |
+
+**计时标准写法（测 GPU 真实耗时）**
+
+```cpp
+cudaEvent_t start, stop;
+cudaEventCreate(&start); cudaEventCreate(&stop);
+cudaEventRecord(start);
+kernel<<<grid, block>>>(...);          // 要测的操作
+cudaEventRecord(stop);
+cudaEventSynchronize(stop);            // 等 GPU 真正算完
+float ms; cudaEventElapsedTime(&ms, start, stop);
+cudaEventDestroy(start); cudaEventDestroy(stop);
+```
+
+**三条路线**：手写 kernel（完全可控）｜ cuBLAS（官方成品库，注意列主序）｜ CUTLASS（可定制模板库）。三者只有"计算"那一步不同，内存/计时流程完全通用。详见 [`cuda_reference/`](cuda_reference/)。
+
 ## CUDA 之下的两层基础
 
 CUDA 代码只是 GPU 编程接口。学习路线还需要回答两个更底层的问题：
