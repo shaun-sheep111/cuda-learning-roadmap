@@ -220,6 +220,9 @@ CUDA 代码只是 GPU 编程接口。学习路线还需要回答两个更底层�
 
 ## 路线总览
 
+<details open>
+<summary>展开 / 收起 9 周总览表</summary>
+
 | 阶段 | 周次 | 天数 | 主题 | 难度 | 官方指南对应 |
 |------|------|------|------|------|-------------|
 | **先修** | 并行计算思维 | — | 任务拆分 / 依赖 / 通信 / 同步 / Roofline | ★☆☆☆☆ | [`parallel_thinking/`](parallel_thinking/) |
@@ -236,9 +239,14 @@ CUDA 代码只是 GPU 编程接口。学习路线还需要回答两个更底层�
 
 > **PG** = Programming Guide, **BPG** = Best Practices Guide
 
+</details>
+
 ---
 
 ## 每日详细路线
+
+<details>
+<summary>展开查看 Week 1–9 每日代码与知识点（60 天）</summary>
 
 ### Week 1: CUDA 基础 (Day 01-07) — 入门
 
@@ -354,6 +362,8 @@ CUDA 代码只是 GPU 编程接口。学习路线还需要回答两个更底层�
 | 58 | `day58_sparse_vector.cu` | 稀疏矩阵向量乘 | BPG 10-12 | CSR/ELL 格式, warp 级编程, 负载均衡 |
 | 59 | `day59_anomaly_detection.cu` | 并行异常检测 | 综合 | 统计计算 + 排序 + 阈值, APOD 全流程实战 |
 | 60 | `day60_final_capstone.cu` | 毕业项目: 图像处理管线 | 全部 | 多 kernel 管线, Graph 调度, 性能剖析报告 |
+
+</details>
 
 ---
 
