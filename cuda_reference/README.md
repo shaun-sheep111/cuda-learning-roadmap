@@ -291,4 +291,164 @@ gemm.can_implement(args); gemm.initialize(args, workspace); gemm.run();
 
 ---
 
-**延伸**：[分块矩阵乘法](../hardware_basics/tiled_matmul.md) ｜ [SGEMM 优化链](../hardware_basics/sgemm_optimize.md) ｜ [同步vs异步传输](../hardware_basics/sync_async_transfer.md)
+## 八、Warp 级编程语法
+
+Warp 是 GPU 调度线程的基本单位，当前 CUDA GPU 的 `warpSize` 为 **32**。同一 block 内，相邻的 32 个线性线程组成一个 warp；warp 内可以直接交换寄存器数据、投票和同步。
+
+### 1. 线程编号：lane 与 warp
+
+```cpp
+// kernel 内使用；适用于一维、二维、三维 block（x 方向变化最快）
+unsigned tid = threadIdx.x + blockDim.x *
+               (threadIdx.y + blockDim.y * threadIdx.z);
+unsigned lane = tid % warpSize;       // 当前线程在 warp 内的位置：0~31
+unsigned warp_id = tid / warpSize;    // 当前 warp 在 block 内的编号
+constexpr unsigned FULL_MASK = 0xffffffffu;
+```
+
+`blockDim.x = 256` 的一维 block 有 8 个完整 warp。若 block 的总线程数不是 32 的倍数，最后一个 warp 不完整，不能直接套用要求完整 warp 的示例。
+
+### 2. 参与掩码 mask：哪些线程一起执行
+
+`mask` 是 32 位无符号整数，第 `i` 位为 1 表示 lane `i` 参与。**调用线程自身必须在 mask 中；mask 中所有尚未退出的线程必须执行同一个 intrinsic，并传入相同 mask。** mask 不会自动把分支外的线程拉进来，也不会把缺失的源 lane 补成 0。
+
+```cpp
+// 前提：完整 warp 的 32 个线程都执行这里
+bool valid = idx < n;                         // idx 为当前线程的数据索引
+unsigned members = __ballot_sync(FULL_MASK, valid);
+if (valid) {
+    // members 在分支前确定，标记所有 valid 线程
+    int leader = __ffs(members) - 1;          // 第一个参与 lane
+    float first = __shfl_sync(members, value, leader);
+    // first 为 leader 的 value；所有 members 线程都要执行上面的 shuffle
+}
+```
+
+- `__activemask()`：返回**执行到此处时**的活跃 lane 掩码，不是屏障。独立线程调度下，它不能替代分支前的 `__ballot_sync` 来确定逻辑上的参与集合。
+- `__ffs(mask)`：返回最低置位位的位置（从 1 开始）；`__popc(mask)`：返回置位数，可用来统计参与线程数。
+- `FULL_MASK` 适用于完整 warp 全员执行同一操作的情形；稀疏 mask 的 lane 编号仍是物理编号，不会重新连续编号。
+
+### 3. Shuffle：直接读取其他 lane 的寄存器
+
+以下 `v` 是每个线程自己的值；`width` 可省略，默认 32，也可取 2、4、8、16，将 warp 分成连续等宽子组。
+
+| 语法 | 含义 |
+|---|---|
+| `__shfl_sync(mask, v, srcLane, width)` | 读取所在子组内编号为 `srcLane` 的 lane 的值，常用于广播 |
+| `__shfl_up_sync(mask, v, delta, width)` | 读取所在子组内编号比自己小 `delta` 的 lane 的值 |
+| `__shfl_down_sync(mask, v, delta, width)` | 读取所在子组内编号比自己大 `delta` 的 lane 的值 |
+| `__shfl_xor_sync(mask, v, laneMask, width)` | 读取所在子组内编号与自己异或 `laneMask` 的 lane 的值，常用于蝶形交换 |
+
+```cpp
+// 前提：完整 warp 全员执行，v 为 float 或支持的整数等标量类型
+float broadcast = __shfl_sync(FULL_MASK, v, 0);  // 广播 lane 0 的 v
+float neighbor  = __shfl_xor_sync(FULL_MASK, v, 1); // 0↔1、2↔3……
+
+// 每 8 个 lane 一组，分别广播组内第 0 个 lane 的值
+float subgroup = __shfl_sync(FULL_MASK, v, 0, 8);
+```
+
+源 lane 必须活跃且参与该次 shuffle，否则读到的值未定义。`up/down` 的源位置越过子组边界时返回调用者自己的值。**Shuffle 不提供共享内存或全局内存的读写顺序保证。**
+
+### 4. 投票、匹配与硬件归约
+
+| 语法 | 返回值 / 用途 | 硬件要求 |
+|---|---|---|
+| `__all_sync(mask, pred)` | 所有参与线程的 `pred` 都非零时返回非零 | 计算能力 5.0+ |
+| `__any_sync(mask, pred)` | 任一参与线程的 `pred` 非零时返回非零 | 计算能力 5.0+ |
+| `__ballot_sync(mask, pred)` | 返回参与线程中 `pred` 非零的 lane 位图 | 计算能力 5.0+ |
+| `__match_any_sync(mask, value)` | 返回参与线程中与自己 `value` 相同的 lane 位图 | 计算能力 7.0+ |
+| `__match_all_sync(mask, value, &pred)` | 全员值相同则返回 mask 且 `pred=1`，否则返回 0 且 `pred=0` | 计算能力 7.0+ |
+| `__reduce_add_sync(mask, value)` | 参与线程的整数和，每个参与线程都获得结果 | 计算能力 8.0+ |
+| `__reduce_min_sync` / `__reduce_max_sync` | 参与线程的整数最小值 / 最大值，参数同上 | 计算能力 8.0+ |
+| `__reduce_and_sync` / `__reduce_or_sync` / `__reduce_xor_sync` | 参与线程的无符号整数按位归约，参数同上 | 计算能力 8.0+ |
+
+硬件归约的 `add/min/max` 支持 32 位 `int` / `unsigned int`，不能直接传 `float`。浮点归约可用下面的 shuffle 写法。编译时需选择覆盖对应计算能力的目标架构。
+
+### 5. 可复用示例：每个 warp 输出一个浮点和
+
+尾部不足 32 个数据时，仍让完整 warp 执行归约，越界数据填 0。这样每次 shuffle 的源 lane 都存在。
+
+```cpp
+#include <cuda_runtime.h>
+
+__device__ float warp_sum(float v) {
+    constexpr unsigned FULL_MASK = 0xffffffffu;
+    // 调用约定：完整 warp 的所有 32 个线程执行此函数
+    for (int offset = 16; offset > 0; offset >>= 1)
+        v += __shfl_down_sync(FULL_MASK, v, offset);
+    return v;  // 仅 lane 0 持有整个 warp 的和
+}
+
+__global__ void sum_per_warp(const float *in, float *out, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int lane = threadIdx.x % warpSize;
+    float v = (idx < n) ? in[idx] : 0.0f;  // 不要提前 return
+    float sum = warp_sum(v);
+    if (lane == 0 && idx < n)
+        out[idx / warpSize] = sum;
+}
+
+// host 端启动片段：d_in / d_out 已分配，n 为非负数
+// d_out 至少容纳 (n + 31) / 32 个 float
+int block = 256;                           // 一维 block，线程数必须是 32 的倍数
+if (n > 0) {
+    int grid = (n + block - 1) / block;
+    sum_per_warp<<<grid, block>>>(d_in, d_out, n);
+    CUDA_CHECK(cudaGetLastError());        // 使用第五节的宏
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+```
+
+例如 `n = 35`，输出为前 32 个元素之和、最后 3 个元素之和。若需要整个数组的总和，还要继续归约这些输出。浮点加法顺序与 CPU 串行求和不同，结果可能有舍入差异。
+
+### 6. Warp 同步与 Cooperative Groups
+
+`__syncwarp(mask)` 是指定 warp 成员之间的屏障，并保证参与线程在屏障前的内存访问对屏障后的参与线程有序可见。以下示例要求完整 warp 全员执行：
+
+```cpp
+// kernel 内，使用第一小节的 tid / lane
+// block 总线程数必须是 32 的倍数且不超过 256
+__shared__ float scratch[256];
+scratch[tid] = value;
+__syncwarp(0xffffffffu);                    // 等待本 warp 的写入
+float peer = scratch[tid ^ 1u];            // 读取同 warp 相邻 lane 的数据
+__syncwarp(0xffffffffu);                    // 后续复用 scratch 前，等待本轮读取完成
+```
+
+跨 warp 交换共享内存数据需要 `__syncthreads()` 等 block 级同步。Volta 起支持独立线程调度，不应依赖“同 warp 一定隐式同步”的旧写法；`volatile` 也不能替代同步。
+
+也可以用 Cooperative Groups 显式表达 32 线程子组：
+
+```cpp
+#include <cooperative_groups.h>
+namespace cg = cooperative_groups;
+
+__global__ void cg_warp_sum(const float *in, float *out, int n) {
+    // 一维 block，线程数是 32 的倍数；整个 block 都必须执行分组操作
+    auto block = cg::this_thread_block();
+    auto tile = cg::tiled_partition<32>(block);
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    float v = (idx < n) ? in[idx] : 0.0f;
+    for (int offset = 16; offset > 0; offset >>= 1)
+        v += tile.shfl_down(v, offset);
+    if (tile.thread_rank() == 0 && idx < n)
+        out[idx / 32] = v;
+    // tile.sync() 可用于该子组内需要内存同步的场景
+}
+```
+
+普通 kernel 内的 `tiled_partition<32>` 不需要协作式 kernel 启动。分组与组内集合操作仍必须由相应组的所有成员共同执行。
+
+**常见错误速查：**
+
+- 在 `if (idx < n)` 内用 `FULL_MASK`，却让其他尚未退出的 lane 跳过同一次调用：违反参与约定。
+- 对任意稀疏 mask 直接套用 `offset = 16, 8, 4, 2, 1` 的归约：可能读取不参与的源 lane；优先采用上面的完整 warp 补零方案。
+- 认为 `__shfl_*_sync` 的 `_sync` 等价于内存屏障：共享内存通信仍需 `__syncwarp` 或更大范围的同步。
+- 使用旧的 `__shfl`、`__ballot` 等无 `_sync` 接口：新代码应使用带 mask 的同步接口。
+
+参考：[CUDA Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html) 中的 Warp Shuffle、Warp Vote、Warp Match、Warp Reduce 和 Synchronization Functions 说明。
+
+---
+
+**延伸**：[分块矩阵乘法](../hardware_basics/tiled_matmul.md) ｜ [SGEMM 优化链](../hardware_basics/sgemm_optimize.md) ｜ [同步vs异步传输](../hardware_basics/sync_async_transfer.md) ｜ [Warp 级编程练习](../week4_advanced/day22_warp_programming.cu)
