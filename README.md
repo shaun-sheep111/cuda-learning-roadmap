@@ -3,6 +3,16 @@
 > 基于 NVIDIA 官方《CUDA C++ Programming Guide》(598页) 和《CUDA C++ Best Practices Guide》(118页) 系统化设计
 > 每天一个 CUDA 代码，不断熟悉，不断了解 GPU，学习并行异构计算与 GPU 编程
 
+## GPU 架构交互首页
+
+[![GPU 结构、执行层级与 CPU 通信](assets/gpu-architecture.svg)](https://shaun-sheep111.github.io/cuda-learning-roadmap/)
+
+**[打开 GPU 架构交互首页 →](https://shaun-sheep111.github.io/cuda-learning-roadmap/)**
+
+黑绿芯片结构图支持点击查看 **CPU、工作分发器、SM、L2、显存与拷贝引擎**；切换视图理解 **Grid → Block → Warp → Thread** 如何映射到硬件，并逐步播放 **H2D → kernel → D2H → 同步** 的运行流程。支持手机浏览和键盘操作。
+
+> 上图可在 GitHub 首页直接查看；点击进入 GitHub Pages 后使用交互功能。图中数量为教学示意，不代表特定 GPU 配置；本项目为独立学习项目，非 NVIDIA 官方网站。
+
 ## 📊 在线学习路线图
 
 👉 **[点击查看完整学习路线图（在线渲染）](https://shaun-sheep111.github.io/cuda-learning-roadmap/roadmap.html)**
@@ -28,7 +38,7 @@ CUDA 代码真正执行时，会经历“主机提交 → GPU 分发 → SM 执�
 
 ```mermaid
 flowchart LR
-    CPU[CPU / Host 内存] <-->|PCIe / NVLink + DMA| GPU[GPU Device]
+    CPU[CPU / Host 内存] <-->|PCIe + DMA（常见独立显卡）| GPU[GPU Device]
     subgraph GPU
         FRONT[前端与工作分发器]
         subgraph CLUSTERS[GPC / TPC 物理分组]
@@ -73,19 +83,21 @@ int i = blockIdx.x * blockDim.x + threadIdx.x;  // 当前 Thread 找到数据
 sequenceDiagram
     participant CPU as CPU / Host
     participant Q as Driver + Stream
-    participant DMA as PCIe/NVLink + DMA
+    participant DMA as PCIe + DMA
     participant SM as SM / Warp
     participant MEM as L2 / 显存
-    CPU->>Q: kernel 参数和 grid/block 入队
-    CPU->>DMA: H2D 搬运 A、B
+    CPU->>DMA: 同一 Stream 中先提交 H2D 搬运 A、B
     DMA->>MEM: 写入显存
-    Q->>SM: 分发 Block
+    CPU->>Q: 随后提交 kernel 参数和 grid/block
+    Q->>SM: 前序 H2D 完成后分发 Block
     SM->>MEM: load A[i]、B[i]
     MEM-->>SM: 返回寄存器
     SM->>SM: C[i] = A[i] + B[i]
     SM->>MEM: store C[i]
     CPU->>DMA: D2H 请求 C
-    DMA-->>CPU: 返回结果
+    DMA-->>CPU: 传输结果到主机内存
+    CPU->>Q: cudaStreamSynchronize 等待完成
+    Q-->>CPU: 此后可安全读取结果
 ```
 
 H2D/D2H 是 CPU 与 GPU 的通信，L2/显存是 GPU 内的数据路径，寄存器和 shared memory 是 SM 内的高速数据路径。动画版可以[打开 GPU Workflow Lab](https://shaun-sheep111.github.io/cuda-learning-roadmap/hardware_basics/gpu_workflow_animation.html)，用播放或单步观察这七个阶段。
@@ -118,12 +130,12 @@ H2D/D2H 是 CPU 与 GPU 的通信，L2/显存是 GPU 内的数据路径，寄存
 
 一句话：**CPU 优化延迟，GPU 优化吞吐**。GPU 靠"海量线程 + 快速切换"隐藏内存延迟。
 
-**硬件层次**：`GPU → 多个 SM → (CUDA Core + Tensor Core + 寄存器 + 共享内存/L1) → Warp(32线程) → Thread`
+**硬件组成**：`GPU → 多个 SM → CUDA Core / Tensor Core / 访存管线 + 调度器 + 寄存器 + 共享内存/L1`。Warp 和 Thread 是执行组织与线程状态，不是 Core 下一级的物理部件。
 对应软件模型：`Grid → Block(落到一个 SM) → Warp → Thread`。
 
 **Warp（最重要的概念）**：GPU 以 **32 个线程为一组(warp)** 执行同一条指令（SIMT）。由此两大性能点：
 - **线程束分化**：warp 内走不同 if 分支 → 串行各分支 → 变慢。所以 block size 常取 32 的倍数。
-- **合并访问**：warp 内 32 线程访问连续内存 → 合并为一次事务 → 快；访问分散则慢。
+- **合并访问**：warp 内线程访问连续且适当对齐的内存 → 用较少的内存事务完成 → 更高效；实际事务数量由访问宽度、对齐和架构决定。
 
 **内存层次（快→慢 / 小→大）**
 
