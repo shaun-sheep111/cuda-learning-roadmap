@@ -228,213 +228,108 @@ CUDA 代码只是 GPU 编程接口。学习路线还需要回答两个更底层�
 阅读顺序：先修 → Week1-2 基础 → Week3-5 模式/实战 → Week6-9 优化/专家。
 学 AI Infra 可从 `parallel_thinking/` 的 FlashAttention / vLLM 小节入手，再回到 Week3/4/7 找对应 kernel 与内存技术。
 
-具体每周内容见下方总览表：
+每周安排与每日内容统一在 [HTML 学习路线图](https://shaun-sheep111.github.io/cuda-learning-roadmap/roadmap.html) 中查看；下面补充面试准备与 AI Infra 实践方向。
 
-## 路线总览
+## CUDA 面试题与答题要点
 
-<details open>
-<summary>展开 / 收起 9 周总览表</summary>
+建议按“执行模型 → 内存与同步 → 性能分析 → 算子实现”的顺序准备。回答时给出适用条件、代码或性能数据，并说明如何验证正确性。
 
-| 阶段 | 周次 | 天数 | 主题 | 难度 | 官方指南对应 |
-|------|------|------|------|------|-------------|
-| **先修** | 并行计算思维 | — | 任务拆分 / 依赖 / 通信 / 同步 / Roofline | ★☆☆☆☆ | [`parallel_thinking/`](parallel_thinking/) |
-| **先修** | 硬件基础 | — | GPU 工作流程 / SM / warp / 内存层次 | ★☆☆☆☆ | [`hardware_basics/`](hardware_basics/) |
-| **入门** | Week 1 | Day 01-07 | CUDA 基础概念 | ★☆☆☆☆ | PG Ch3-5, BPG Ch2-3 |
-| **入门** | Week 2 | Day 08-14 | 内存模型入门 | ★★☆☆☆ | PG Ch6.2, BPG Ch10 |
-| **进阶** | Week 3 | Day 15-21 | 并行模式 | ★★☆☆☆ | PG Ch10, BPG Ch12 |
-| **进阶** | Week 4 | Day 22-28 | 高级主题 | ★★★☆☆ | PG Ch10-11 |
-| **进阶** | Week 5 | Day 29-30 | 实战项目 | ★★★☆☆ | 综合 |
-| **高级** | Week 6 | Day 31-37 | 性能优化与 APOD | ★★★☆☆ | BPG Ch8-13, PG Ch8 |
-| **专家** | Week 7 | Day 38-44 | 高级并行编程 | ★★★★☆ | PG Ch10.19-10.28, Ch12, Ch20 |
-| **专家** | Week 8 | Day 45-52 | CUDA 生态系统 | ★★★★☆ | PG Ch13-16, BPG Ch6,14-20 |
-| **大师** | Week 9 | Day 53-60 | 专家级实战 | ★★★★★ | 全部综合 |
+### 执行模型与内存
 
-> **PG** = Programming Guide, **BPG** = Best Practices Guide
+| 面试题 | 回答要点 / 追问 |
+|---|---|
+| 1. Grid、Block、Warp、Thread 与 SM 有什么关系？ | Grid 是一次 kernel 的全部 Block；传统 Block 调度中，一个 Block 驻留在单个 SM，一个 SM 可容纳多个 Block；Warp 由 32 个连续线性线程组成。线程不与 CUDA Core 永久绑定。 |
+| 2. 为什么 block size 常取 32 的倍数？256 是否总是最优？ | 避免尾部不完整 Warp；最优配置还受寄存器、共享内存、Block 数和访存模式影响。用多组配置测量，不能只看线程数。 |
+| 3. Warp divergence 为什么影响性能？ | 同 Warp 的不同路径通常需要分阶段执行，部分 lane 被屏蔽；影响取决于路径长度与分布。可讨论谓词化、任务重排及其代价。 |
+| 4. Global、Shared、Register、L1/L2 的区别？ | 区分作用域、生命周期、显式管理与硬件缓存；寄存器压力可能造成 spill，local memory 虽为线程私有，却位于设备内存体系。 |
+| 5. 什么是合并访存？连续访问一定只有一次事务吗？ | Warp 的地址、对齐、访问宽度和架构决定事务数；连续且对齐通常可减少事务。解释 stride、AoS/SoA 与矩阵转置的差别。 |
+| 6. Shared Memory 的 bank conflict 是什么？ | 同一 Warp 的访问映射到相同 bank 的不同地址时可能发生冲突；同地址广播是重要例外。以矩阵转置和 padding 解释，注意数据类型与架构差异。 |
+| 7. `__syncthreads()`、`__syncwarp()` 和原子操作分别解决什么？ | 前两者分别同步 Block / 指定 Warp 成员，并提供相应内存顺序保证；原子操作保证目标操作的原子性，不能充当整个 Block 的屏障。普通 kernel 的 Block 间没有通用全局屏障。 |
+| 8. 尾部不足 32 个元素时，如何安全做 Warp 归约？ | 完整 Warp 共同执行，越界数据填归约单位元；mask 中尚未退出的成员须执行同次操作。稀疏 mask 不会压紧 lane 编号，也不能保证 shuffle 源 lane 有效。 |
 
-</details>
+### 异步执行与性能优化
 
----
+| 面试题 | 回答要点 / 追问 |
+|---|---|
+| 9. Kernel 启动返回后，GPU 是否已经完成计算？ | 通常没有；区分启动错误与异步执行错误。分别检查 `cudaGetLastError()` 与适当的同步调用，避免逐 kernel 全局同步破坏并发。 |
+| 10. 多 Stream 就能让传输与计算重叠吗？ | 还需设备并发能力、适当的 pinned 主机内存、异步 API 与独立任务；同 Stream 依序执行，跨 Stream 用 Event 建立依赖，并留意默认 Stream 语义。 |
+| 11. 为什么 Occupancy 高不一定快？ | Occupancy 是活跃 Warp 数相对硬件上限的比例。更高占用率可能牺牲寄存器复用；低占用率也可能已饱和算术或带宽。结合 stall、吞吐和执行时间判断。 |
+| 12. 如何区分计算瓶颈、显存瓶颈和启动开销？ | 用 Roofline 比较算术强度与带宽 / 算力上限，再用 Nsight 验证；短 kernel 还可能受启动与调度开销限制。避免仅依据 GPU 利用率下结论。 |
+| 13. 如何可靠地测量 kernel 性能？ | 预热，隔离 JIT / 分配等一次性开销，在正确 Stream 上用 CUDA Event，多次重复并报告分布；分别测设备耗时和端到端延迟，校验输出误差。 |
+| 14. GEMM 为什么需要 Shared / Register Tiling？ | 增加数据复用、提高算术强度；分析 tile 大小、寄存器压力、边界、流水与 Tensor Core 数据布局之间的取舍，并与 cuBLAS 对比。 |
+| 15. CUDA Graph 和算子融合有什么区别？ | Graph 降低重复提交一组工作的 CPU 开销；融合可减少 kernel 启动及中间张量读写，但也可能增加资源压力。Graph 本身不等于算子融合。 |
+| 16. 如何排查 kernel 结果偶发错误？ | 检查越界、未初始化、数据竞争、同步参与条件、跨 Stream 生命周期和数值误差；用 Compute Sanitizer 的 memcheck / racecheck 等工具缩小问题范围。 |
 
-## 每日详细路线
+### 手写与性能分析练习
 
-<details>
-<summary>展开查看 Week 1–9 每日代码与知识点（60 天）</summary>
+| 练习题 | 必须解释的边界与验证方式 | 仓库入口 |
+|---|---|---|
+| 实现任意长度 Sum / Max 归约 | 非 2 的幂、尾部 mask、跨 Block 合并、浮点误差；与 CPU 结果对比 | [归约优化](week3_patterns/day15_reduction.cu)、[Warp Shuffle](week4_advanced/day23_warp_shuffle.cu) |
+| 实现高效矩阵转置 | 合并读写、Shared Memory padding、非整 tile 边界；报告有效带宽 | [矩阵转置](week2_memory/day09_matrix_transpose.cu) |
+| 从朴素 GEMM 优化到分块 GEMM | 数据复用、寄存器 / Shared 资源占用；说明不同矩阵形状的表现 | [分块 GEMM](week3_patterns/day17_tiled_matmul.cu)、[SGEMM 优化链](hardware_basics/sgemm_optimize.md) |
+| 设计分块 H2D → 计算 → D2H 流水 | Stream 依赖、缓冲区复用与主机读取时机；用时间线证明重叠 | [Stream 与 Event](week4_advanced/day25_streams_events.cu) |
 
-### Week 1: CUDA 基础 (Day 01-07) — 入门
+语法查阅：[CUDA 编程范式与 Warp API](cuda_reference/README.md)。硬件与分析基础：[GPU 工作流程](hardware_basics/architecture_workflow.md)、[并行计算思维](parallel_thinking/README.md)。
 
-| Day | 文件 | 主题 | 官方指南映射 | 学到什么 |
-|-----|------|------|-------------|----------|
-| 01 | `day01_hello_cuda.cu` | Hello CUDA | PG 3-5.1 | Kernel 编写, grid/block/thread, H2D/D2H 传输 |
-| 02 | `day02_device_query.cu` | 设备查询 | PG 5.6, BPG 15 | GPU 硬件参数, 计算能力, 配置选择 |
-| 03 | `day03_vector_ops.cu` | 向量运算 | PG 5.2 | Grid/Block 配置对比, grid-stride loop |
-| 04 | `day04_error_handling.cu` | 错误处理 | PG 6.2.12, BPG 14 | CUDA_CHECK 宏, 常见错误类型 |
-| 05 | `day05_gpu_timer.cu` | GPU 计时 | BPG 9.1 | CUDA Event 计时, CPU/GPU 性能对比 |
-| 06 | `day06_dot_product.cu` | 点积归约 | PG 10.14 | 并行归约, __syncthreads, 共享内存 |
-| 07 | `day07_week1_review.cu` | 综合练习 | PG 5.3 | 1D 卷积 (朴素 vs 共享内存) |
+## AI Infra：从 CUDA 算子到训练与推理系统
 
-### Week 2: 内存模型 (Day 08-14) — 入门
+AI Infra 需要同时理解 **算子执行、显存管理、请求调度与多卡通信**。单个 kernel 变快只是其中一环；应围绕真实负载、正确性、端到端延迟和资源成本选择优化方法。
 
-| Day | 文件 | 主题 | 官方指南映射 | 学到什么 |
-|-----|------|------|-------------|----------|
-| 08 | `day08_shared_memory.cu` | 共享内存 | PG 6.2.4, BPG 10.2.3 | __shared__, bank conflict, halo |
-| 09 | `day09_matrix_transpose.cu` | 矩阵转置 | BPG 10.2.1 | 合并访问, padding 消除冲突 |
-| 10 | `day10_constant_memory.cu` | 常量内存 | PG 10.2.2, BPG 10.2.5 | __constant__, 广播机制, 缓存 |
-| 11 | `day11_texture_memory.cu` | 纹理内存 | PG 6.2.12, BPG 10.2.4 | 2D 空间局部性, 硬件插值 |
-| 12 | `day12_global_coalescing.cu` | 合并访问 | BPG 10.2.1 | stride 访问, AoS vs SoA |
-| 13 | `day13_pinned_memory.cu` | 固定内存 | PG 6.2.6, BPG 10.1.1 | pinned memory, 异步传输 |
-| 14 | `day14_week2_review.cu` | 分块矩阵乘法 | BPG 10.2.3 | Tiled matmul, 综合内存优化 |
+### 核心方向与面试追问
 
-### Week 3: 并行模式 (Day 15-21) — 进阶
+| 方向 | 需要掌握的内容 | 典型面试题 / 分析任务 |
+|---|---|---|
+| 算子与编译 | GEMM、Reduction、Softmax、LayerNorm / RMSNorm；融合、布局、CUDA / Triton、框架算子调用 | 为什么融合可能更慢？如何判断应使用 cuBLAS、编译器生成代码还是手写 kernel？ |
+| Attention 与 FlashAttention | Q/K/V、分块、online softmax、片上复用；减少 Attention 中间矩阵的显存读写 | 不显式保存完整注意力矩阵，如何保持 softmax 数值稳定？标准精确 Attention 的计算复杂度是否改变？ |
+| LLM 推理阶段 | Prefill 一次处理输入序列，Decode 逐步生成；batch、序列长度、GQA / MQA 对工作负载的影响 | 为什么两阶段瓶颈常不同？Prefill 常更易利用矩阵计算，Decode 小 batch 常受权重 / KV 访存影响，但如何验证？ |
+| KV Cache 与 PagedAttention | KV 容量、逻辑块到物理块映射、碎片、前缀共享与引用生命周期 | PagedAttention 如何改善分配与利用率？为什么它不自动减少每个 token 原始 KV 数据量？ |
+| 推理服务与调度 | Continuous Batching、Chunked Prefill、请求准入、抢占、取消与背压 | 长输入怎样影响短请求？吞吐增加时 TTFT、TPOT 与 P99 如何变化？ |
+| 分布式训练 | DDP、梯度 All-Reduce、梯度累积、混合精度、ZeRO / FSDP 状态分片 | 参数、梯度、优化器状态与激活分别占多少显存？分片如何以通信换容量？ |
+| 多卡推理与通信 | DP / TP / PP / EP；All-Reduce、All-Gather、Reduce-Scatter、All-to-All；NCCL 与拓扑 | TP 的通信为什么可能限制低延迟？EP 的 All-to-All 与负载不均如何影响 MoE？ |
+| 量化与部署 | FP16 / BF16、INT8 / INT4、权重量化与 KV 量化、scale、反量化及可用 kernel | 为什么模型更小不一定更快？如何同时验证精度、延迟、显存与硬件支持？ |
+| 性能与稳定性 | Nsight Systems / Compute、框架 profiler、显存峰值、OOM、服务监控与压测 | GPU 利用率高但吞吐低，如何区分计算、访存、通信、CPU 调度和排队问题？ |
 
-| Day | 文件 | 主题 | 官方指南映射 | 学到什么 |
-|-----|------|------|-------------|----------|
-| 15 | `day15_reduction.cu` | 归约优化 | BPG 12 | 4 种归约策略, warp divergence |
-| 16 | `day16_prefix_sum.cu` | 前缀和 | PG 10.22 | Hillis-Steele, Blelloch scan |
-| 17 | `day17_tiled_matmul.cu` | 矩阵乘法进阶 | BPG 10.2.3 | 寄存器 tile, 计算强度 |
-| 18 | `day18_histogram.cu` | 直方图 | PG 10.14, BPG 10.2.3 | atomicAdd, privatization |
-| 19 | `day19_compact.cu` | 流压缩 | PG 10.22 | predicate → scan → scatter |
-| 20 | `day20_bitonic_sort.cu` | 双调排序 | BPG 12 | 并行排序网络 |
-| 21 | `day21_week3_review.cu` | K-Means 聚类 | 综合 | 归约 + 原子操作 + 综合应用 |
+### 两个必须会估算的问题
 
-### Week 4: 高级主题 (Day 22-28) — 进阶
+**1. KV Cache 大约占多少显存？**
 
-| Day | 文件 | 主题 | 官方指南映射 | 学到什么 |
-|-----|------|------|-------------|----------|
-| 22 | `day22_warp_programming.cu` | Warp 编程 | PG 10.19 | warp divergence, __ballot_sync |
-| 23 | `day23_warp_shuffle.cu` | Warp Shuffle | PG 10.22 | __shfl_sync, 寄存器间交换 |
-| 24 | `day24_dynamic_parallelism.cu` | 动态并行 | PG Ch15 | GPU 启动 GPU, 递归 kernel |
-| 25 | `day25_streams_events.cu` | 流与事件 | PG 6.2.8 | 多流重叠, 异步执行 |
-| 26 | `day26_multi_gpu.cu` | 多 GPU | PG 6.2.9 | 多设备管理, P2P |
-| 27 | `day27_cublas_cudnn.cu` | CUDA 库 | BPG 6.1 | cuBLAS, 库 vs 手写 |
-| 28 | `day28_thrust.cu` | Thrust | BPG 6.1 | device_vector, 算法库 |
+对常见 decoder-only 模型，若每层 KV 结构相同、K/V 使用相同存储精度，已缓存 token 的原始 KV 大小可估为：
 
-### Week 5: 实战项目 (Day 29-30) — 进阶
+```text
+KV bytes ≈ 2 × L × Σ(T_i) × H_kv × D_head × S
 
-| Day | 文件 | 主题 | 官方指南映射 | 学到什么 |
-|-----|------|------|-------------|----------|
-| 29 | `day29_image_blur.cu` | 2D 图像卷积 | BPG 10.2.3 | tiled 卷积, 常量内存, 边界处理 |
-| 30 | `day30_final_project.cu` | N-Body 模拟 | 综合 | 综合应用所有技术 |
+2       ：Key 与 Value
+L       ：层数
+Σ(T_i)  ：各请求当前已缓存 token 数之和
+H_kv    ：KV head 数（GQA / MQA 中通常小于 Query head 数）
+D_head  ：每个 head 的维度
+S       ：每元素存储字节数，例如 FP16 / BF16 为 2
+```
 
----
+例如 32 层、8 个 KV heads、head dim 为 128、FP16 存储，一个请求缓存 4096 tokens，原始 KV 约为 **512 MiB**。实际分配还需考虑页块对齐、元数据、量化 scale 与并行切分；前缀共享可减少重复存储。模型权重、激活和工作区另算。
 
-### Week 6: 性能优化与 APOD (Day 31-37) — 高级
+**2. 为什么 batch 变大可能提高吞吐，却让用户感觉更慢？**
 
-> **核心目标**: 掌握 NVIDIA 官方 APOD 性能优化方法论，学会使用性能分析工具定位瓶颈
+更大 batch 可摊薄权重读取与启动开销，也会增加工作量、显存压力及等待时间。必须联合观察：
 
-| Day | 文件 | 主题 | 官方指南映射 | 学到什么 |
-|-----|------|------|-------------|----------|
-| 31 | `day31_performance_metrics.cu` | 性能度量 | BPG 9 | 理论/有效带宽计算, CPU vs GPU 计时, throughput 分析 |
-| 32 | `day32_apod_methodology.cu` | APOD 方法论 | BPG 2.2, 4 | Assess-Parallelize-Optimize-Deploy 全流程, Amdahl/Gustafson 定律 |
-| 33 | `day33_occupancy.cu` | Occupancy 优化 | PG 8.2.3, BPG 11.1 | 占用率计算, 寄存器/共享内存对占用率影响, launch bounds |
-| 34 | `day34_instruction_throughput.cu` | 指令吞吐量 | PG 8.4, BPG 12 | 原生指令吞吐量表, 循环展开, 整数/浮点优化 |
-| 35 | `day35_control_flow.cu` | 控制流优化 | BPG 13 | warp divergence, 分支预测, predicate 优化 |
-| 36 | `day36_numerical_accuracy.cu` | 数值精度 | BPG 7.3 | 单/双精度, IEEE 754, 浮点非结合性, 合并误差 |
-| 37 | `day37_optimization_review.cu` | 优化综合实战 | BPG 8-13 | 端到端优化一个 kernel: profile → 分析 → 优化 → 验证 |
+| 指标 | 含义 | 分析时的注意点 |
+|---|---|---|
+| TTFT | 请求到达至第一个 token 的时间 | 明确是否包含排队、分词、Prefill 与网络 |
+| TPOT / ITL | 输出 token 的平均间隔 / 相邻 token 延迟 | 区分均值与逐 token 分布；说明统计口径 |
+| Throughput | 每秒请求数或 token 数 | 明确输入 / 输出 token、并发、长度分布与硬件 |
+| P50 / P95 / P99 | 延迟分位数 | 关注长尾，并说明样本量和压测方式 |
+| Goodput | 满足指定延迟与质量目标的有效吞吐 | 先定义 SLO，再比较优化收益 |
 
-### Week 7: 高级并行编程 (Day 38-44) — 专家
+### 建议完成的 AI Infra 实践
 
-> **核心目标**: 掌握 GPU 硬件特性驱动的编程技术，包括 Tensor Cores、Cooperative Groups、异步拷贝
+1. **算子优化报告**：实现稳定 Softmax 或 RMSNorm，对比框架基线，覆盖不同形状与精度；提交误差、带宽 / 耗时、性能分析与适用边界。
+2. **Attention 数据流分析**：画出朴素 Attention 与分块 Attention 的中间结果去向，推导 online softmax 的最大值、归一化和输出累积更新，解释减少了哪些显存读写。
+3. **推理服务压测**：使用固定模型与硬件，对比输入 / 输出长度、并发和 batching 配置；记录 TTFT、TPOT、吞吐、P99 与峰值显存，给出满足 SLO 的配置。
+4. **多卡通信实验**：在可用的多卡环境测量不同消息大小的集合通信，结合 GPU / 网络拓扑解释延迟与带宽，并分析 TP、DP 或 EP 的通信需求。
 
-| Day | 文件 | 主题 | 官方指南映射 | 学到什么 |
-|-----|------|------|-------------|----------|
-| 38 | `day38_warp_vote_match.cu` | Warp Vote/Match | PG 10.20-10.21 | __ballot_sync, warp match, 活跃线程发现 |
-| 39 | `day39_cooperative_groups.cu` | Cooperative Groups | PG Ch12 | thread_block_tile, coalesced group, group collectives |
-| 40 | `day40_tensor_cores.cu` | Tensor Cores / WMMA | PG 10.24 | wmma::fragment, FP16 矩阵乘, 半精度计算 |
-| 41 | `day41_async_barrier.cu` | 异步 Barrier | PG 10.26 | arrive/wait 模式, warp specialization, 生产者-消费者 |
-| 42 | `day42_cuda_graphs.cu` | CUDA Graphs | PG 6.2.8.7 | 图构建, stream capture, 图实例化与更新, 性能优势 |
-| 43 | `day43_unified_memory.cu` | Unified Memory | PG Ch20 | cudaMallocManaged, 预取, 页迁移, GPU 显存超分 |
-| 44 | `day44_async_copy_pipeline.cu` | 异步拷贝与流水线 | PG 10.27-10.28 | memcpy_async, cuda::pipeline, 多级缓冲, TMA |
+这些是扩展实践方向，仓库中的 CUDA 练习提供底层基础；训练 / 推理服务实验需要另外配置模型、框架与硬件环境。
 
-### Week 8: CUDA 生态系统 (Day 45-52) — 专家
-
-> **核心目标**: 掌握 CUDA 生态系统的完整工具链，从内存管理到编译部署
-
-| Day | 文件 | 主题 | 官方指南映射 | 学到什么 |
-|-----|------|------|-------------|----------|
-| 45 | `day45_l2_cache_mgmt.cu` | L2 缓存管理 | PG 6.2.3 | L2 持久化访问, access window, 缓存策略 |
-| 46 | `day46_stream_ordered_alloc.cu` | Stream Ordered Allocator | PG Ch14 | cudaMallocAsync, 内存池, 异步分配/释放 |
-| 47 | `day47_virtual_memory.cu` | 虚拟内存管理 | PG Ch13 | 物理内存分配, 虚拟地址映射, 内存复用 |
-| 48 | `day48_nvcc_compilation.cu` | nvcc 编译选项 | PG 6.1, BPG 20 | PTX, cubin, JIT, -arch/-code/-gencode, 离线/在线编译 |
-| 49 | `day49_cub_cudnn.cu` | CUB 与 cuDNN | BPG 6.1 | CUB 块级/设备级原语, cuDNN 卷积 |
-| 50 | `day50_debugging.cu` | CUDA 调试技术 | BPG 7.2 | cuda-gdb, cuda-memcheck, printf, assert, race check |
-| 51 | `day51_deployment.cu` | 部署与兼容性 | BPG 14-18 | CUDA 兼容性, 运行时检测, 错误恢复, 集群管理 |
-| 52 | `day52_multi_context.cu` | 多上下文与 NUMA | BPG 11.5, 10.4 | 多进程 GPU 共享, NUMA 亲和性, 上下文切换开销 |
-
-### Week 9: 专家级实战 (Day 53-60) — 大师
-
-> **核心目标**: 综合运用所有技术，完成真实场景的 GPU 加速项目
-
-| Day | 文件 | 主题 | 官方指南映射 | 学到什么 |
-|-----|------|------|-------------|----------|
-| 53 | `day53_convolution_2d.cu` | 2D 卷积终极优化 | BPG 10, 12 | 常量+共享+异步拷贝, 多版本对比, profile 驱动优化 |
-| 54 | `day54_nbody_optimized.cu` | N-Body 终极优化 | PG 8, BPG 10-12 | 共享内存分块+向量化+unroll, 性能逐层提升 |
-| 55 | `day55_tensor_matmul.cu` | Tensor Core 矩阵乘法 | PG 10.24 | WMMA 16x16x16, FP16 vs FP32, 性能对比 cuBLAS |
-| 56 | `day56_graph_pipeline.cu` | Graph + 流水线优化 | PG 6.2.8.7, 10.28 | CUDA Graph + async pipeline, 端到端优化 |
-| 57 | `day57_gaussian_blur.cu` | 高斯模糊完整实现 | 综合 | 可分离滤波器, 多通道处理, 边界策略 |
-| 58 | `day58_sparse_vector.cu` | 稀疏矩阵向量乘 | BPG 10-12 | CSR/ELL 格式, warp 级编程, 负载均衡 |
-| 59 | `day59_anomaly_detection.cu` | 并行异常检测 | 综合 | 统计计算 + 排序 + 阈值, APOD 全流程实战 |
-| 60 | `day60_final_capstone.cu` | 毕业项目: 图像处理管线 | 全部 | 多 kernel 管线, Graph 调度, 性能剖析报告 |
-
-</details>
-
----
-
-## 官方指南章节对照速查
-
-本路线按 NVIDIA 官方指南设计：[Programming Guide (PG)](https://docs.nvidia.com/cuda/cuda-c-programming-guide/) 与 [Best Practices Guide (BPG)](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)。每日代码对应的具体章节也见各 `.cu` 文件头注释。
-
-<details>
-<summary>展开查看 PG / BPG 章节 → 天数 完整对照表</summary>
-
-### Programming Guide (PG) 核心章节
-
-| 章节 | 标题 | 对应天数 |
-|------|------|---------|
-| Ch 3 | Introduction (GPU 好处, CUDA 平台) | Day 01 |
-| Ch 5 | Programming Model (Kernel, Thread, Memory) | Day 01-07 |
-| Ch 6.1 | Compilation with NVCC | Day 48 |
-| Ch 6.2.2 | Device Memory | Day 03, 05 |
-| Ch 6.2.3 | L2 Access Management | Day 45 |
-| Ch 6.2.4 | Shared Memory | Day 06, 08-09 |
-| Ch 6.2.6 | Page-Locked Host Memory | Day 13 |
-| Ch 6.2.8 | Asynchronous Concurrent Execution | Day 25, 42 |
-| Ch 6.2.9 | Multi-Device System | Day 26 |
-| Ch 6.2.12 | Texture and Surface Memory | Day 11 |
-| Ch 8 | Performance Guidelines | Day 31-37 |
-| Ch 10.14 | Atomic Functions | Day 06, 18 |
-| Ch 10.19-10.22 | Warp Vote/Match/Reduce/Shuffle | Day 22-23, 38 |
-| Ch 10.24 | Warp Matrix Functions (Tensor Cores) | Day 40, 55 |
-| Ch 10.26 | Asynchronous Barrier | Day 41 |
-| Ch 10.27-10.28 | Async Data Copies (memcpy_async, pipeline) | Day 44 |
-| Ch 12 | Cooperative Groups | Day 39 |
-| Ch 13 | Virtual Memory Management | Day 47 |
-| Ch 14 | Stream Ordered Memory Allocator | Day 46 |
-| Ch 15 | CUDA Dynamic Parallelism | Day 24 |
-| Ch 20 | Unified Memory Programming | Day 43 |
-
-### Best Practices Guide (BPG) 核心章节
-
-| 章节 | 标题 | 对应天数 |
-|------|------|---------|
-| Ch 2.2 | APOD (Assess, Parallelize, Optimize, Deploy) | Day 32 |
-| Ch 2.4 | Assessing Your Application | Day 32 |
-| Ch 3 | Heterogeneous Computing | Day 01 |
-| Ch 4 | Application Profiling | Day 32, 37 |
-| Ch 7 | Getting the Right Answer (验证/调试/精度) | Day 36, 50 |
-| Ch 8 | Optimizing CUDA Applications | Day 31-37 |
-| Ch 9 | Performance Metrics (Timing, Bandwidth) | Day 05, 31 |
-| Ch 10 | Memory Optimizations | Day 08-14, 45 |
-| Ch 10.1 | Data Transfer (Pinned, Async, Zero Copy) | Day 13 |
-| Ch 10.2.1 | Coalesced Access to Global Memory | Day 12, 15 |
-| Ch 10.2.3 | Shared Memory | Day 08-09, 14 |
-| Ch 11 | Execution Configuration Optimizations | Day 33 |
-| Ch 11.1 | Occupancy | Day 33 |
-| Ch 12 | Instruction Optimization | Day 34 |
-| Ch 13 | Control Flow (Divergence, Predication) | Day 35 |
-| Ch 14-18 | Deploying CUDA Applications | Day 51 |
-| Ch 20 | nvcc Compiler Switches | Day 48 |
-
-</details>
+继续阅读：[并行思维中的 FlashAttention / vLLM 分析](parallel_thinking/README.md) · [vLLM 文档](https://docs.vllm.ai/) · [PyTorch 分布式文档](https://docs.pytorch.org/docs/stable/distributed.html) · [NCCL 文档](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/) · [Triton 教程](https://triton-lang.org/main/getting-started/tutorials/index.html)。
 
 ---
 
